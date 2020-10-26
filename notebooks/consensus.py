@@ -9,8 +9,8 @@
 2. Мастер-нода устанавливает связь между собой и агентами (передает сокеты);
 3. Мастер-нода передает сокеты для общения между агентами;
 4. Мастер передает всем агентам NETWORK_READY;
-5. Агенты заявляют о готовности начать новый раунд консенсуса (отправляют NEW_ROUND мастеру);
-6. Когда все агенты готовы, мастер посылает всем NEW_ROUND --- начинается новый раунд консенсуса;
+5. Агенты заявляют о готовности начать новый раунд консенсуса (отправляют (NEW_ROUND, _свой вес_) мастеру);
+6. Когда все агенты готовы, мастер посылает всем (NEW_ROUND, _средний вес_) --- начинается новый раунд консенсуса;
 7. Агенты вычисляют функцию;
 8. Агенты запрашивают у соседей значение их функции (отправка REQUEST_VALUE) и получают от соседей посчитанное значение;
 9. Когда агент понимает, что он сошелся с соседями, он посылает мастеру CONVERGED (но при этом агент все еще должен участвовать в коммуникации с соседями);
@@ -20,8 +20,8 @@
 '''
 
 import numpy as np
-from threading import Thread, Lock, RLock
 import asyncio, sys
+import functools
 
 # asyncio.get_event_loop().set_debug(True)
 
@@ -40,18 +40,21 @@ class ConsensusNetwork:
         self.tokens = list(set(np.array(topology).flatten()))
         self.agents = dict()
         self.agents_sockets = dict()
-        self.lock = RLock()
         self.shutdown_q = shutdown_q
         
         self.running_round = False
         self.agent_new_round = dict()
+        self.agent_weight = dict()
         self.agent_converged = dict()
         
         self.debug = debug
         
     def _debug(self, *args, **kwargs):
         if self.debug:
-            print(*args, **kwargs)
+            if 'file' not in kwargs.keys():
+                print('Master:', *args, **kwargs, file=sys.stderr)
+            else:
+                print('Master:', *args, **kwargs)
     
     def describe(self):
         E = np.array([ [
@@ -65,22 +68,30 @@ class ConsensusNetwork:
         L_eig.sort()
         print('Eigenvalues: {}'.format(L_eig))
         print('Algebraic connectivity: {}'.format(L_eig[1]))
-        eps = 0.99 / np.max(outdeg) # eps \in (0, 1/max deg)
-        P = np.eye(outdeg.shape[0]) - eps * L
+        P = np.eye(outdeg.shape[0]) - self.__calc_eps() * L
         print('Perron matrix:\n{}'.format(P))
         P_eig = np.linalg.eigvals(P)
         P_eig.sort()
         print('Eigenvalues: {}'.format(P_eig))
-        print('Convergence speed: {}'.format(P_eig[1]**2))
+        print('Convergence speed: {}'.format(np.abs(P_eig[1])))
+        
+    @functools.lru_cache
+    def __calc_eps(self):
+        E = np.array([ [
+                int((u, v) in self.topology or (v, u) in self.topology)
+                for v in self.tokens
+            ] for u in self.tokens])
+        outdeg = np.sum(E, axis=1)
+        eps = 0.95 / np.max(outdeg) # eps \in (0, 1/max deg)
+        return eps
         
     def register_agent(self, agent):
-        with self.lock:
-            if agent.token not in self.tokens:
-                raise IllegalArgumentException('Agent with token {} is not presented in given topology'.format(agent.token))
-            self.agents[agent.token] = agent
-            self._debug('Got {}/{} agents'.format(len(self.agents.keys()), len(self.tokens)), file=sys.stderr)
-            if len(self.agents.keys()) == len(self.tokens):
-                self.initialize_agents()
+        if agent.token not in self.tokens:
+            raise IllegalArgumentException('Agent with token {} is not presented in given topology'.format(agent.token))
+        self.agents[agent.token] = agent
+        self._debug(f'Got {len(self.agents.keys())}/{len(self.tokens)} agents')
+        if len(self.agents.keys()) == len(self.tokens):
+            self.initialize_agents()
                 
     def initialize_agents(self):
         for token, agent in self.agents.items():
@@ -101,54 +112,48 @@ class ConsensusNetwork:
                     cur_sockets = (r, w)
                 data[n_token] = cur_sockets
             agent.set_neighbors(data)
+            agent.set_epsilon(self.__calc_eps())
             
         for token, (r, w) in self.agents_sockets.items():
             asyncio.create_task(w.put(NETWORK_READY), name='master put NETWORK_READY')
             
     async def serve(self):
-        self._debug('Master: serving...', file=sys.stderr)
+        self._debug('serving...')
         self.agent_new_round = { token: False for token in self.tokens }
         self.agent_converged = { token: False for token in self.tokens }
         while True:
             monitor_shutdown = asyncio.create_task(self.shutdown_q.get(), name='master check shutdown')
-            monitor_agents = { token: asyncio.create_task(r.get(), name='master check agent "{}"'.format(token)) 
+            monitor_agents = { token: asyncio.create_task(r.get(), name=f'master check agent "{token}"')
                               for token, (r, w) in self.agents_sockets.items() }
             done, pending = await asyncio.wait({monitor_shutdown}.union(set(monitor_agents.values())), return_when=asyncio.FIRST_COMPLETED)
             if monitor_shutdown in done:
-                self._debug('Master: ===== SHUTDOWN =====', file=sys.stderr)
+                self._debug('===== SHUTDOWN =====')
                 for token, (r, w) in self.agents_sockets.items():
                     await w.put(SHUTDOWN)
                 self.shutdown_q.task_done()
                 break
             
-            check_new_round = False
-            check_done = False
-            
             for token, monitor in monitor_agents.items():
                 if monitor in done:
                     req = monitor.result()
-                    if req == NEW_ROUND:
-                        self._debug('Master: got NEW_ROUND from "{}"'.format(token), file=sys.stderr)
+                    if isinstance(req, tuple) and req[0] == NEW_ROUND:
+                        self._debug(f'got NEW_ROUND from "{token}" with weight {req[1]}')
                         if self.running_round:
-                            self._debug('Master: got NEW_ROUND from "{}" but round is already running'.format(token), file=sys.stderr)
-                        with self.lock:
-                            self.agent_new_round[token] = True
-                            check_new_round = True
+                            self._debug(f'got NEW_ROUND from "{token}" but round is already running')
+                        self.agent_new_round[token] = True
+                        self.agent_weight[token] = req[1]
                     elif req == CONVERGED:
-                        self._debug('Master: got CONVERGED from "{}"'.format(token), file=sys.stderr)
+                        self._debug(f'got CONVERGED from "{token}"')
                         if not self.running_round:
-                            self._debug('Master: got CONVERGED from "{}" but round is not yet running'.format(token), file=sys.stderr)
-                        with self.lock:
-                            self.agent_converged[token] = True
-                            check_done = True
+                            self._debug(f'got CONVERGED from "{token}" but round is not yet running')
+                        self.agent_converged[token] = True
                     elif req == NOT_CONVERGED:
-                        self._debug('Master: got NOT_CONVERGED from "{}"'.format(token), file=sys.stderr)
+                        self._debug(f'got NOT_CONVERGED from "{token}"')
                         if not self.running_round:
-                            self._debug('Master: got NOT_CONVERGED from "{}" but round is not yet running'.format(token), file=sys.stderr)
-                        with self.lock:
-                            self.agent_converged[token] = False
+                            self._debug(f'got NOT_CONVERGED from "{token}" but round is not yet running')
+                        self.agent_converged[token] = False
                     else:
-                        self._debug('Master: got unexpected request from "{}": {}'.format(token, req), file=sys.stderr)
+                        self._debug(f'got unexpected request from "{token}": {req}')
                     
                     r, _ = self.agents_sockets[token]
                     r.task_done()
@@ -156,97 +161,105 @@ class ConsensusNetwork:
             for t in pending:
                 t.cancel()
                 
-            with self.lock:
-                if not self.running_round and all(self.agent_new_round.values()): 
-                    self._debug('Master: ===== STARTING A NEW ROUND =====', file=sys.stderr)
-                    self.running_round = True
-                    self.agent_new_round = { token: False for token in self.tokens }
-                    self.agent_converged = { token: False for token in self.tokens }
-                    for token, (r, w) in self.agents_sockets.items():
-                        await w.put(NEW_ROUND)
+            if not self.running_round and all(self.agent_new_round.values()): 
+                self._debug('===== STARTING A NEW ROUND =====')
+                self.running_round = True
+                self.agent_new_round = { token: False for token in self.tokens }
+                self.agent_converged = { token: False for token in self.tokens }
+                mean_weight = sum(self.agent_weight.values()) / len(self.tokens)
+                for token, (r, w) in self.agents_sockets.items():
+                    await w.put((NEW_ROUND, mean_weight))
 
-                self._debug("Master: checking DONE: {}/{} converged".format( sum(list(map(int, list(self.agent_converged.values())))) , len(self.tokens) ), file=sys.stderr)
-                if self.running_round and all(self.agent_converged.values()):
-                    self._debug('Master: ===== ALL NODES CONVERGED! DONE =====', file=sys.stderr)
-                    self.running_round = False
-                    for token, (r, w) in self.agents_sockets.items():
-                        await w.put(DONE)
+            self._debug(f"checking DONE: {sum(list(map(int, list(self.agent_converged.values()))))}/{len(self.tokens)} converged")
+            if self.running_round and all(self.agent_converged.values()):
+                self._debug('===== ALL NODES CONVERGED! DONE =====')
+                self.running_round = False
+                for token, (r, w) in self.agents_sockets.items():
+                    await w.put(DONE)
                 
                 
 class ConsensusAgent:
-    def __init__(self, token, debug=False, eps=1e-10):
+    def __init__(self, token, debug=False, convergence_eps=1e-4):
         self.token = token
         self.neighbor_sockets = dict()
         self.master_sockets = None
         
         self.network_ready = False
-        
-        self.eps = eps
+        self.consensus_eps = None
+        self.convergence_eps = convergence_eps
         self.debug = debug
         
     def _debug(self, *args, **kwargs):
         if self.debug:
-            print(*args, **kwargs)
+            if 'file' not in kwargs.keys():
+                print(f'Agent "{self.token}":', *args, **kwargs, file=sys.stderr)
+            else:
+                print(f'Agent "{self.token}":', *args, **kwargs)
         
     def set_master(self, master_sockets):
         self.master_sockets = master_sockets
-        self._debug('Agent "{}" heard from master'.format(self.token), file=sys.stderr)
+        self._debug('heard from master')
     
     def set_neighbors(self, neighbor_sockets: dict):
         self.neighbor_sockets = neighbor_sockets
-        self._debug('Agent "{}" got neighbors from master'.format(self.token), file=sys.stderr)
+        self._debug('got neighbors from master')
+        
+    def set_epsilon(self, eps):
+        self.consensus_eps = eps
+        self._debug(f'got consensus epsilon from master: {self.consensus_eps}')
     
     async def run_round(self, value, weight):
-        self._debug('Agent "{}": running new round with v={}, w={}'.format(self.token, value, weight), file=sys.stderr)
+        self._debug(f'running new round with v={value}, w={weight}')
         if not self.network_ready:
-            self._debug('Agent "{}" initialized. Waiting for NETWORK_READY'.format(self.token), file=sys.stderr)
+            self._debug('initialized. Waiting for NETWORK_READY')
             rdy = await self.master_sockets[0].get()
-            self._debug('Agent "{}" got {}'.format(self.token, rdy), file=sys.stderr)
+            self._debug(f'got {rdy}')
             self.master_sockets[0].task_done()
             self.network_ready = rdy == NETWORK_READY
             if not self.network_ready:
                 return rdy
         
         # clear queues in case DONE was transmitted in the middle of the previous round
-        self._debug('Agent "{}" clearing queues'.format(self.token), file=sys.stderr)
+        self._debug('clearing queues')
         for token, (r, w) in self.neighbor_sockets.items():
             while r.qsize() > 0:
                 r.get_nowait()
                 r.task_done()
         
-        self._debug('Agent "{}" sending NEW_ROUND to master'.format(self.token), file=sys.stderr)
-        await self.master_sockets[1].put(NEW_ROUND)
-        new_round = await self.master_sockets[0].get()
+        self._debug('sending NEW_ROUND to master')
+        await self.master_sockets[1].put((NEW_ROUND, weight))
+        resp = await self.master_sockets[0].get()
         self.master_sockets[0].task_done()
-        if new_round != NEW_ROUND:
-            return new_round
+        if not isinstance(resp, tuple) or resp[0] != NEW_ROUND:
+            return resp
+        mean_weight = resp[1]
         
-        self._debug('Agent "{}": NEW_ROUND ack!'.format(self.token), file=sys.stderr)
+        self._debug('NEW_ROUND ack!')
         
         converged_flag_set = False
         done_flag = False
-        x = value
+        y = value * weight / mean_weight
         neighbor_count = len(self.neighbor_sockets.keys())
 
         while not done_flag:
-            self._debug('Agent "{}": requesting values from neighbors'.format(self.token), file=sys.stderr)
+            self._debug('requesting values from neighbors')
             for token, (r, w) in self.neighbor_sockets.items():
                 await w.put(REQUEST_VALUE)
 
-            neighbor_values_weights = {}
+            neighbor_values = {}
 
-            while len(neighbor_values_weights.keys()) != neighbor_count:
+            while len(neighbor_values.keys()) != neighbor_count:
                 if self.master_sockets[0].qsize() > 0:
                     res = self.master_sockets[0].get_nowait()
                     self.master_sockets[0].task_done()
                     if res == DONE:
-                        self._debug('Agent "{}": got DONE from master!!!'.format(self.token), file=sys.stderr)
+                        self._debug('got DONE from master!!!')
                         done_flag = True
                         break
                     elif res == SHUTDOWN:
                         return SHUTDOWN # TODO: maybe it is better to throw an exception
                     else:
-                        self._debug('Unexpected request from master: {}'.format(res), file=sys.stderr)
+                        self._debug(f'Unexpected request from master: {res}')
                     continue
                 monitor_master = asyncio.create_task(self.master_sockets[0].get())
                 monitor_neighbors = { token: asyncio.create_task(r.get()) 
@@ -259,13 +272,13 @@ class ConsensusAgent:
                     res = monitor_master.result()
                     self.master_sockets[0].task_done()
                     if res == DONE:
-                        self._debug('Agent "{}": got DONE from master!!!'.format(self.token), file=sys.stderr)
+                        self._debug('got DONE from master!!!')
                         done_flag = True
                         break
                     elif res == SHUTDOWN:
                         return SHUTDOWN # TODO: maybe it is better to throw an exception
                     else:
-                        self._debug('Unexpected request from master: {}'.format(res), file=sys.stderr)
+                        self._debug(f'Unexpected request from master: {res}')
                 for token, task in monitor_neighbors.items():
                     if task in done:
                         res = task.result()
@@ -273,36 +286,39 @@ class ConsensusAgent:
                         r.task_done()
                         if isinstance(res, str):
                             if res == REQUEST_VALUE:
-                                self._debug('Agent "{}": sending values to "{}"'.format(self.token, token), file=sys.stderr)
-                                await w.put((x, weight))
+                                self._debug(f'sending values to "{token}"')
+                                await w.put(y)
                             else:
-                                self._debug('Agent "{}" got unexpected request from "{}": {}'.format(self.token, token, res), file=sys.stderr)
-                        else: # consider it a (value, weight)
-                            self._debug('Agent "{}": got values from "{}"!'.format(self.token, token), file=sys.stderr)
-                            neighbor_values_weights[token] = res
+                                self._debug(f'got unexpected request from "{token}": {res}')
+                        else: # consider it a value
+                            self._debug(f'got value from "{token}": {res}!')
+                            neighbor_values[token] = res
                             
             if done_flag: break
 
-            neighbor_values_weights[self.token] = (x, weight)
+            '''
+            Умеем считать 1/n \sum x_i, а хотим (\sum x_i w_i) / (\sum w_i).
+            Если мы скажем мастеру свой вес, то мастер сможет вернуть нам в начале раунда средний вес агентов.
+            А тогда при y_i = x_i w_i / mean_w:
+            1/n \sum y_i = 1/n \sum (x_i w_i / (1/n sum w_j)) = 1/n \sum (n x_i w_i / \sum w_j) = \sum (x_i w_i) / (\sum w_j)
+            '''
+                
+            y = y * (1 - self.consensus_eps * neighbor_count) + self.consensus_eps * np.sum(list(neighbor_values.values()), axis=0)
             
-            x = np.sum([v * w for (v, w) in neighbor_values_weights.values()], axis=0) / \
-                np.sum([w for (v, w) in neighbor_values_weights.values()])
+            c = np.all([ np.isclose(y, v, rtol=self.convergence_eps) for v in neighbor_values.values()])
             
-            c = np.all([ np.isclose(x, v, rtol=self.eps) for (v, w) in neighbor_values_weights.values()])
-            
-            self._debug('Agent "{}": updated value = {}, c={}'.format(self.token, x, c), file=sys.stderr)
+            self._debug(f'updated value = {y}, c={c}')
             
             if c:
                 if not converged_flag_set:
-                    self._debug('Agent "{}": sending CONVERGED to master'.format(self.token), file=sys.stderr)
+                    self._debug('sending CONVERGED to master')
                     await self.master_sockets[1].put(CONVERGED)
                     converged_flag_set = True
             else:
                 if converged_flag_set:
-                    self._debug('Agent "{}": sending NOT_CONVERGED to master'.format(self.token), file=sys.stderr)
+                    self._debug('sending NOT_CONVERGED to master')
                     await self.master_sockets[1].put(NOT_CONVERGED)
                     converged_flag_set = False
-            
-        self._debug('Agent "{}": final result: {}'.format(self.token, x), file=sys.stderr)
-        return x
+        self._debug(f'final result: {y}')
+        return y
         
