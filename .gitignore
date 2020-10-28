@@ -9,6 +9,9 @@ __pycache__/
 # Huge data
 data/cifar10/
 
+# networks checkpoints
+notebooks/checkpoint/
+
 # C extensions
 *.so
 
