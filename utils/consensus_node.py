@@ -4,13 +4,20 @@ import torch
 from copy import deepcopy
 import seaborn as sns
 import matplotlib.pyplot as plt
+import utils.config as cf
+from notebooks.networks import *
 
 
 class ConsensusNode:
-    def __init__(self, name: str, model, model_args: list, optimizer, error, train_loader, test_loader, weights: dict,
-                 lr=0.02, niter=100, stat_step=50, neighbors=None):
-        self.model = model(*model_args)
-        self.optimizer = optimizer(self.model.parameters(), lr=lr)
+    def __init__(self, name: str, model, model_args: list, optimizer, optimizer_kwargs: dict, error,
+                 train_loader, test_loader, weights: dict,
+                 lr=0.02, stat_step=50, neighbors=None):
+        self.model_name = model
+        self.model = self._get_model(self.model_name)(*model_args)
+        self.optimizer = optimizer
+        self.optimizer_kwargs = optimizer_kwargs
+        self.lr = lr
+
         self.error = error()
         self.train_loader = train_loader
         self.train_loader_iter = cycle(iter(self.train_loader))
@@ -22,35 +29,63 @@ class ConsensusNode:
         self.weights: dict = weights
         self.parameters: dict = dict()
 
-        self.niter = niter
-        self.curr_iter = 0
+        self.curr_iter: int = 0
+        self.train_loss: int = 0
 
-        self.stat_step = stat_step
-        self.accuracy_list = []
-        self.iter_list = []
-        self.loss_list = []
+        self.stat_step: int = stat_step
+        self.accuracy_list: list = []
+        self.iter_list: list = []
+        self.loss_list: list = []
+
+    def _get_model(self, model_name):
+        if model_name == 'lenet':
+            return LeNet
+        elif model_name == 'ann':
+            return ANNModel
+        elif model_name == 'vggnet':
+            return VGG
+        elif model_name == 'resnet':
+            return ResNet
+        elif model_name == 'wide-resnet':
+            return Wide_ResNet
+        else:
+            print("Error: Bad model name. Network should be either [ANN / LeNet / VGGNet / ResNet / Wide_ResNet",
+                  file=sys.stderr)
+            exit(0)
 
     def _calc_accuracy(self):
         correct = 0
         total = 0
+        if self.model == 'ann':
+            pass
+        else:
+            self.model.eval()
+            self.model.training = False
 
-        # Predict test dataset
-        for images, labels in self.test_loader:
-            test = Variable(images.view(-1, 28 * 28))
+        with torch.no_grad():
+            # Predict test dataset
+            for images, labels in self.test_loader:
+                if self.model_name == 'ann':
+                    test = Variable(images.view(-1, 28 * 28))
+                else:
+                    test, labels = Variable(images), Variable(labels)
 
-            # Forward propagation
-            outputs = self.model(test)
+                # Forward propagation
+                outputs = self.model(test)
 
-            # Get predictions from the maximum value
-            predicted = torch.max(outputs.data, 1)[1]
+                # Get predictions from the maximum value
+                predicted = torch.max(outputs.data, 1)[1]
 
-            # Total number of labels
-            total += len(labels)
+                # Total number of labels
+                total += len(labels)
 
-            # Total correct predictions
-            correct += (predicted == labels).sum()
+                # Total correct predictions
+                if self.model_name == 'ann':
+                    correct += (predicted == labels).sum()
+                else:
+                    correct += predicted.eq(labels.data).cpu().sum()
 
-        return 100 * correct / float(total)
+            return 100 * correct / float(total)
 
     def set_neighbors(self, neighbors):
         self.neighbors = neighbors
@@ -81,16 +116,29 @@ class ConsensusNode:
             for p, pn in zip(self.model.parameters(), params):
                 p.data += pn.data * self.weights[node_name]
 
-    def fit_step(self):
+    def fit_step(self, epoch):
         self.curr_iter += 1
 
-        # Getting next batch
         images, labels = next(self.train_loader_iter)
-        train = Variable(images.view(-1, 28 * 28))
-        labels = Variable(labels)
+
+        if self.model_name == 'ann':
+            optimizer = self.optimizer(self.model.parameters(),
+                                       lr=self.lr,
+                                       **self.optimizer_kwargs)
+            # Getting next batch
+            train = Variable(images.view(-1, 28 * 28))
+            labels = Variable(labels)
+        else:
+            self.model.train()
+            self.model.training = True
+            optimizer = self.optimizer(self.model.parameters(),
+                                       lr=cf.learning_rate(self.lr, epoch),
+                                       **self.optimizer_kwargs)
+            train = Variable(images)
+            labels = Variable(labels)
 
         # Clear gradients
-        self.optimizer.zero_grad()
+        optimizer.zero_grad()
 
         # Forward propagation
         outputs = self.model(train)
@@ -102,12 +150,15 @@ class ConsensusNode:
         loss.backward()
 
         # Update parameters
-        self.optimizer.step()
+        optimizer.step()
+
+        self.train_loss += loss.item()
 
         # Save stats
         if self.curr_iter % self.stat_step == 0:
             self.iter_list.append(self.curr_iter)
-            self.loss_list.append(float(loss.data))
+            self.loss_list.append(float(self.train_loss))
+            self.train_loss = 0
             self.accuracy_list.append(float(self._calc_accuracy()))
-            print(f"Step: {self.curr_iter}, Node {self.name}:"
+            print(f"Epoch: {epoch}, Step: {self.curr_iter}, Node {self.name}:"
                   f" accuracy {self.accuracy_list[-1]:.2f}, loss {self.loss_list[-1]:.2f}")
