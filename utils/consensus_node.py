@@ -1,11 +1,9 @@
-from torch.autograd import Variable
 from itertools import cycle
-import torch
 from copy import deepcopy
 import seaborn as sns
 import matplotlib.pyplot as plt
 import utils.config as cf
-from notebooks.networks import *
+from networks import *
 
 
 class ConsensusNode:
