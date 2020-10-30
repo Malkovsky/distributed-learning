@@ -2,7 +2,8 @@ from itertools import cycle
 from copy import deepcopy
 import seaborn as sns
 import matplotlib.pyplot as plt
-import utils.config as cf
+import wide_resnet_submodule.config as cf
+from wide_resnet_submodule.networks import *
 from networks import *
 
 
