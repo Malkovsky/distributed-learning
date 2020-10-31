@@ -3,6 +3,15 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# Intellij Idea / PyCharm
+.idea/
+
+# Huge data
+data/cifar10/
+
+# networks checkpoints
+notebooks/checkpoint/
+
 # C extensions
 *.so
 
