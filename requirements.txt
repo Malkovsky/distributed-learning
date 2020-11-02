@@ -7,3 +7,5 @@ IPython
 seaborn
 pytorch
 torchvision
+cvxpy
+networkx
