@@ -4,7 +4,13 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import wide_resnet_submodule.config as cf
 from wide_resnet_submodule.networks import *
-from networks import *
+
+model_type = {
+    'lenet':        LeNet,
+    'vggnet':       VGG,
+    'resnet':       ResNet,
+    'wide-resnet':  Wide_ResNet
+}
 
 
 class ConsensusNode:
@@ -37,37 +43,25 @@ class ConsensusNode:
         self.loss_list: list = []
 
     def _get_model(self, model_name):
-        if model_name == 'lenet':
-            return LeNet
-        elif model_name == 'ann':
-            return ANNModel
-        elif model_name == 'vggnet':
-            return VGG
-        elif model_name == 'resnet':
-            return ResNet
-        elif model_name == 'wide-resnet':
-            return Wide_ResNet
+        if model_name in model_type:
+            return model_type[model_name]
         else:
-            print("Error: Bad model name. Network should be either [ANN / LeNet / VGGNet / ResNet / Wide_ResNet",
+            print("Error: Bad model name. Network should be either [LeNet / VGGNet / ResNet / Wide_ResNet",
                   file=sys.stderr)
             exit(0)
 
     def _calc_accuracy(self):
         correct = 0
         total = 0
-        if self.model == 'ann':
-            pass
-        else:
-            self.model.eval()
-            self.model.training = False
+
+        self.model.eval()
+        self.model.training = False
 
         with torch.no_grad():
             # Predict test dataset
             for images, labels in self.test_loader:
-                if self.model_name == 'ann':
-                    test = Variable(images.view(-1, 28 * 28))
-                else:
-                    test, labels = Variable(images), Variable(labels)
+
+                test, labels = Variable(images), Variable(labels)
 
                 # Forward propagation
                 outputs = self.model(test)
@@ -79,10 +73,7 @@ class ConsensusNode:
                 total += len(labels)
 
                 # Total correct predictions
-                if self.model_name == 'ann':
-                    correct += (predicted == labels).sum()
-                else:
-                    correct += predicted.eq(labels.data).cpu().sum()
+                correct += predicted.eq(labels.data).cpu().sum()
 
             return 100 * correct / float(total)
 
@@ -120,21 +111,13 @@ class ConsensusNode:
 
         images, labels = next(self.train_loader_iter)
 
-        if self.model_name == 'ann':
-            optimizer = self.optimizer(self.model.parameters(),
-                                       lr=self.lr,
-                                       **self.optimizer_kwargs)
-            # Getting next batch
-            train = Variable(images.view(-1, 28 * 28))
-            labels = Variable(labels)
-        else:
-            self.model.train()
-            self.model.training = True
-            optimizer = self.optimizer(self.model.parameters(),
-                                       lr=cf.learning_rate(self.lr, epoch),
-                                       **self.optimizer_kwargs)
-            train = Variable(images)
-            labels = Variable(labels)
+        self.model.train()
+        self.model.training = True
+        optimizer = self.optimizer(self.model.parameters(),
+                                   lr=cf.learning_rate(self.lr, epoch),
+                                   **self.optimizer_kwargs)
+        train = Variable(images)
+        labels = Variable(labels)
 
         # Clear gradients
         optimizer.zero_grad()
