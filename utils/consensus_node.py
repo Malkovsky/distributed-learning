@@ -6,33 +6,41 @@ import wide_resnet_submodule.config as cf
 from wide_resnet_submodule.networks import *
 
 model_type = {
-    'lenet':        LeNet,
-    'vggnet':       VGG,
-    'resnet':       ResNet,
-    'wide-resnet':  Wide_ResNet
+    'lenet': LeNet,
+    'vggnet': VGG,
+    'resnet': ResNet,
+    'wide-resnet': Wide_ResNet
 }
 
 
 class ConsensusNode:
-    def __init__(self, name: str, model, model_args: list, optimizer, optimizer_kwargs: dict, error,
-                 train_loader, test_loader, weights: dict,
-                 lr=0.02, stat_step=50, neighbors=None):
-        self.model_name = model
-        self.model = self._get_model(self.model_name)(*model_args)
-        self.optimizer = optimizer
-        self.optimizer_kwargs = optimizer_kwargs
+    # TODO: поддержка  GPU
+    # TODO: сохранение модели в память
+    def __init__(self,
+                 name: str,
+                 train_loader,
+                 test_loader,
+                 weights: dict,
+                 lr=0.02,
+                 stat_step=50,
+                 verbose=0):
+        self.model = None
+        self.optimizer = None
+        self.opt_args = None
+        self.opt_kwargs = None
+        self.error = None
+
         self.lr = lr
 
-        self.error = error()
         self.train_loader = train_loader
         self.train_loader_iter = cycle(iter(self.train_loader))
         self.test_loader = deepcopy(test_loader)
         self.test_loader_iter = cycle(iter(self.test_loader))
 
         self.name: str = name
-        self.neighbors: dict = neighbors
         self.weights: dict = weights
         self.parameters: dict = dict()
+        self.neighbors: dict = dict()
 
         self.curr_iter: int = 0
         self.train_loss: int = 0
@@ -42,6 +50,13 @@ class ConsensusNode:
         self.iter_list: list = []
         self.loss_list: list = []
 
+        self.verbose = verbose
+        self.debug_file = sys.stdout
+
+    def _print_debug(self, msg, verbose):
+        if verbose <= self.verbose:
+            print(msg, file=self.debug_file)
+
     def _get_model(self, model_name):
         if model_name in model_type:
             return model_type[model_name]
@@ -50,7 +65,22 @@ class ConsensusNode:
                   file=sys.stderr)
             exit(0)
 
+    def _set_model(self, model, *args, **kwargs):
+        self.model = model(*args, *kwargs)
+        self._print_debug(f"Node {self.name} set model={self.model} with args={args}, kwargs={kwargs}", 2)
+
+    def _set_optimizer(self, optimizer, *args, **kwargs):
+        self.optimizer = optimizer
+        self.opt_args = args
+        self.opt_kwargs = kwargs
+        self._print_debug(f"Node {self.name} set optimizer={self.optimizer} with args={args}, kwargs={kwargs}", 2)
+
+    def _set_error(self, error, *args, **kwargs):
+        self.error = error(*args, **kwargs)
+        self._print_debug(f"Node {self.name} set error={self.error} with args={args}, kwargs={kwargs}", 2)
+
     def _calc_accuracy(self):
+        # TODO: заменить на передающуюся извне функцию
         correct = 0
         total = 0
 
@@ -60,7 +90,6 @@ class ConsensusNode:
         with torch.no_grad():
             # Predict test dataset
             for images, labels in self.test_loader:
-
                 test, labels = Variable(images), Variable(labels)
 
                 # Forward propagation
@@ -98,7 +127,7 @@ class ConsensusNode:
         self.parameters = {node_name: node.get_params()
                            for node_name, node in self.neighbors.items()}
 
-    def update_params(self):
+    def update_params(self):  # TODO: добавить зависимость коэф-та (сейчас 1.0) от номера эпохи
         for p in self.model.parameters():
             p.data *= self.weights[self.name]
 
@@ -107,6 +136,8 @@ class ConsensusNode:
                 p.data += pn.data * self.weights[node_name]
 
     def fit_step(self, epoch):
+        # TODO: заменить на передающуюся извне ф-ю fit_step(*args, **kwargs)
+        # Нужны передающиеся параметры или нет - разберется
         self.curr_iter += 1
 
         images, labels = next(self.train_loader_iter)
@@ -115,7 +146,7 @@ class ConsensusNode:
         self.model.training = True
         optimizer = self.optimizer(self.model.parameters(),
                                    lr=cf.learning_rate(self.lr, epoch),
-                                   **self.optimizer_kwargs)
+                                   **self.opt_kwargs)
         train = Variable(images)
         labels = Variable(labels)
 
