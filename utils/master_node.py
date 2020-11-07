@@ -89,21 +89,27 @@ class MasterNode:
                         for name in self.node_names}
 
         for node_name, node in self.network.items():
-            node.set_model(self.model, *self.model_args, **self.model_kwargs)
-            node.set_optimizer(self.optimizer, *self.opt_args, **self.opt_kwargs)
-            node.set_error(self.error, *self.error_args, **self.error_kwargs)
+            if self.model:
+                node.set_model(self.model, *self.model_args, **self.model_kwargs)
+            if self.optimizer:
+                node.set_optimizer(self.optimizer, *self.opt_args, **self.opt_kwargs)
+            if self.error:
+                node.set_error(self.error, *self.error_args, **self.error_kwargs)
             node.set_neighbors({neighbor_name: self.network[neighbor_name]
                                 for neighbor_name in self.weights[node_name]
                                 if neighbor_name != node_name})
         return self
 
     def start_consensus(self):
-        # TODO: изначально брать одинаковые веса?
+        self._print_debug(f'Master started\n', verbose=0)
+        start_time = timeit.default_timer()
         for epoch in range(1, self.epoch + 1):
-            start = timeit.default_timer()
+            start_epoch_time = timeit.default_timer()
             self.do_epoch(epoch)
-            stop = timeit.default_timer()
-            self._print_debug(f'Epoch {epoch} ended in {stop - start:.2f} sec\n', verbose=1)
+            self._print_debug(f'Epoch {epoch} ended in {timeit.default_timer() - start_epoch_time:.2f} sec\n',
+                              verbose=1)
+
+        self._print_debug(f'Master ended in {timeit.default_timer() - start_time:.2f} sec\n', verbose=0)
 
     def do_epoch(self, epoch):
         self._print_debug(f"Epoch {epoch}:", verbose=1)
