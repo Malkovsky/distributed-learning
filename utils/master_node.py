@@ -5,21 +5,22 @@ from itertools import cycle
 
 
 class MasterNode:
-    # TODO: сплит данных на куски для каждой ноды
     # TODO: умный выбор весов from fast averaging
     def __init__(self,
                  node_names,
                  weights: dict,
                  train_loaders: dict,
                  test_loader,
-                 fit_step_func,
-                 accuracy_func,
+                 fit_step,
+                 update_params,
+                 calc_accuracy,
                  stat_step=50,
                  lr=0.02,
                  epoch=200,
                  epoch_len=391,
-                 epoch_cons_num=0,
-                 verbose=0):
+                 update_params_epoch_start=0,
+                 update_params_period=1,
+                 verbose=1):
         self.node_names = node_names
 
         self.model = None
@@ -34,8 +35,9 @@ class MasterNode:
 
         self.lr = lr
 
-        self.fit_step_func = fit_step_func
-        self.accuracy_func = accuracy_func
+        self.fit_step = fit_step
+        self.update_params = update_params
+        self.calc_accuracy = calc_accuracy
 
         self.weights: dict = weights
         self.network = None
@@ -46,7 +48,8 @@ class MasterNode:
         self.stat_step = stat_step
         self.epoch: int = epoch
         self.epoch_len: int = epoch_len
-        self.start_consensus_epoch: int = epoch_cons_num
+        self.update_params_epoch_start: int = update_params_epoch_start
+        self.update_params_period: int = update_params_period
 
         self.verbose = verbose
         self.debug_file = sys.stdout
@@ -96,24 +99,32 @@ class MasterNode:
 
     def start_consensus(self):
         # TODO: изначально брать одинаковые веса?
-        for ep in range(1, self.epoch + 1):
+        for epoch in range(1, self.epoch + 1):
             start = timeit.default_timer()
-
-            self._print_debug(f"Epoch {ep}:", verbose=1)
-            for it in range(self.epoch_len):
-                curr_iter = (ep - 1)*self.epoch_len + it + 1
-                for node_name, node in self.network.items():
-                    self.fit_step_func(node, ep)
-                    if curr_iter % self.stat_step == 0:
-                        accuracy = self.accuracy_func(node, self.test_loader)
-                        node._save_accuracy(accuracy, curr_iter)
-                        node._save_loss(curr_iter)
-                if ep >= self.start_consensus_epoch:
-                    for node_name, node in self.network.items():
-                        node.ask_params()
-
-                    for node_name, node in self.network.items():
-                        node.update_params()
-
+            self.do_epoch(epoch)
             stop = timeit.default_timer()
-            self._print_debug(f'Epoch {ep} ended in {stop - start:.2f} sec', verbose=1)
+            self._print_debug(f'Epoch {epoch} ended in {stop - start:.2f} sec\n', verbose=1)
+
+    def do_epoch(self, epoch):
+        self._print_debug(f"Epoch {epoch}:", verbose=1)
+        for it in range(1, self.epoch_len + 1):
+            global_iter = (epoch - 1) * self.epoch_len + it
+
+            # training each model one step (batch for ex.)
+            for node_name, node in self.network.items():
+                self.fit_step(node, epoch)
+                # Save stat each stat_step step
+                if global_iter % self.stat_step == 0:
+                    accuracy = self.calc_accuracy(node, self.test_loader)
+                    node._save_accuracy(accuracy, global_iter)
+                    node._save_loss(global_iter)
+
+            # Consensus starting from the {self.update_params_epoch_start}th epoch
+            # with a period of {self.update_params_period}
+            if epoch >= self.update_params_epoch_start \
+                    and global_iter % self.update_params_period == 0:
+                for node_name, node in self.network.items():
+                    node.ask_params()
+
+                for node_name, node in self.network.items():
+                    self.update_params(node, epoch, global_iter)
