@@ -95,10 +95,3 @@ class ConsensusNode:
         self.parameters = {node_name: node.get_params()
                            for node_name, node in self.neighbors.items()}
 
-    def update_params(self):  # TODO: добавить зависимость коэф-та (сейчас 1.0) от номера эпохи
-        for p in self.model.parameters():
-            p.data *= self.weights[self.name]
-
-        for node_name, params in self.parameters.items():
-            for p, pn in zip(self.model.parameters(), params):
-                p.data += pn.data * self.weights[node_name]
