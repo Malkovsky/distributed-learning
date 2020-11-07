@@ -89,9 +89,9 @@ class MasterNode:
                         for name in self.node_names}
 
         for node_name, node in self.network.items():
-            node._set_model(self.model, *self.model_args, **self.model_kwargs)
-            node._set_optimizer(self.optimizer, *self.opt_args, **self.opt_kwargs)
-            node._set_error(self.error, *self.error_args, **self.error_kwargs)
+            node.set_model(self.model, *self.model_args, **self.model_kwargs)
+            node.set_optimizer(self.optimizer, *self.opt_args, **self.opt_kwargs)
+            node.set_error(self.error, *self.error_args, **self.error_kwargs)
             node.set_neighbors({neighbor_name: self.network[neighbor_name]
                                 for neighbor_name in self.weights[node_name]
                                 if neighbor_name != node_name})
@@ -116,8 +116,8 @@ class MasterNode:
                 # Save stat each stat_step step
                 if global_iter % self.stat_step == 0:
                     accuracy = self.calc_accuracy(node, self.test_loader)
-                    node._save_accuracy(accuracy, global_iter)
-                    node._save_loss(global_iter)
+                    node.save_accuracy(accuracy, global_iter)
+                    node.save_loss(global_iter)
 
             # Consensus starting from the {self.update_params_epoch_start}th epoch
             # with a period of {self.update_params_period}

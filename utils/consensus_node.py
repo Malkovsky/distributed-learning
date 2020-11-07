@@ -45,12 +45,12 @@ class ConsensusNode:
         self.verbose = verbose
         self.debug_file = sys.stdout
 
-    def _save_accuracy(self, accuracy, it):
+    def save_accuracy(self, accuracy, it):
         self.accuracy_list[0].append(accuracy)
         self.accuracy_list[1].append(it)
         self._print_debug(f"Node {self.name}: iter {it}, accuracy= {accuracy:.2f}", verbose=1)
 
-    def _save_loss(self, it):
+    def save_loss(self, it):
         self.loss_list[0].append(self.loss_cum)
         self.loss_list[1].append(it)
         self._print_debug(f"Node {self.name}: iter {it}, cumulative train loss= {self.loss_cum:.2f}", verbose=1)
@@ -60,17 +60,17 @@ class ConsensusNode:
         if verbose <= self.verbose:
             print(msg, file=self.debug_file)
 
-    def _set_model(self, model, *args, **kwargs):
+    def set_model(self, model, *args, **kwargs):
         self.model = model(*args, *kwargs)
         self._print_debug(f"Node {self.name} set model={self.model} with args={args}, kwargs={kwargs}", 2)
 
-    def _set_optimizer(self, optimizer, *args, **kwargs):
+    def set_optimizer(self, optimizer, *args, **kwargs):
         self.optimizer = optimizer
         self.opt_args = args
         self.opt_kwargs = kwargs
         self._print_debug(f"Node {self.name} set optimizer={self.optimizer} with args={args}, kwargs={kwargs}", 2)
 
-    def _set_error(self, error, *args, **kwargs):
+    def set_error(self, error, *args, **kwargs):
         self.error = error(*args, **kwargs)
         self._print_debug(f"Node {self.name} set error={self.error} with args={args}, kwargs={kwargs}", 2)
 
