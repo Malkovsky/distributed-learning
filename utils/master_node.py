@@ -1,5 +1,7 @@
 from utils.consensus_node import ConsensusNode
 import sys
+import timeit
+from itertools import cycle
 
 
 class MasterNode:
@@ -10,6 +12,8 @@ class MasterNode:
                  weights: dict,
                  train_loaders: dict,
                  test_loader,
+                 fit_step_func,
+                 accuracy_func,
                  stat_step=50,
                  lr=0.02,
                  epoch=200,
@@ -29,6 +33,10 @@ class MasterNode:
         self.error_kwargs = None
 
         self.lr = lr
+
+        self.fit_step_func = fit_step_func
+        self.accuracy_func = accuracy_func
+
         self.weights: dict = weights
         self.network = None
 
@@ -38,7 +46,7 @@ class MasterNode:
         self.stat_step = stat_step
         self.epoch: int = epoch
         self.epoch_len: int = epoch_len
-        self.epoch_cons_num: int = epoch_cons_num
+        self.start_consensus_epoch: int = epoch_cons_num
 
         self.verbose = verbose
         self.debug_file = sys.stdout
@@ -70,11 +78,10 @@ class MasterNode:
 
     def initialize_nodes(self):
         self.network = {name: ConsensusNode(name=name,
-                                            train_loader=self.train_loaders[name],
-                                            test_loader=self.test_loader,
                                             lr=self.lr,
                                             stat_step=self.stat_step,
                                             weights=self.weights[name],
+                                            train_loader=cycle(iter(self.train_loaders[name])),
                                             verbose=self.verbose)
                         for name in self.node_names}
 
@@ -89,14 +96,24 @@ class MasterNode:
 
     def start_consensus(self):
         # TODO: изначально брать одинаковые веса?
-        # TODO: замерять время одной эпохи
         for ep in range(1, self.epoch + 1):
+            start = timeit.default_timer()
+
+            self._print_debug(f"Epoch {ep}:", verbose=1)
             for it in range(self.epoch_len):
+                curr_iter = (ep - 1)*self.epoch_len + it + 1
                 for node_name, node in self.network.items():
-                    node.fit_step(ep)
-                if ep >= self.epoch_cons_num:
+                    self.fit_step_func(node, ep)
+                    if curr_iter % self.stat_step == 0:
+                        accuracy = self.accuracy_func(node, self.test_loader)
+                        node._save_accuracy(accuracy, curr_iter)
+                        node._save_loss(curr_iter)
+                if ep >= self.start_consensus_epoch:
                     for node_name, node in self.network.items():
                         node.ask_params()
 
                     for node_name, node in self.network.items():
                         node.update_params()
+
+            stop = timeit.default_timer()
+            self._print_debug(f'Epoch {ep} ended in {stop - start:.2f} sec', verbose=1)
