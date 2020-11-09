@@ -77,8 +77,8 @@ def fit_step_titanic(node, *args, **kwargs):
 
 
 def calc_accuracy_titanic(node, test_loader, *args, **kwargs):
-    x_train, y_train = test_loader
-    return node.model.calc_accuracy(x_train, y_train)
+    x_test, y_test = test_loader
+    return node.model.calc_accuracy(x_test, y_test)
 
 
 def update_params_titanic(node, epoch, *args, **kwargs):
