@@ -5,7 +5,6 @@ from itertools import cycle
 
 
 class MasterNode:
-    # TODO: умный выбор весов from fast averaging
     def __init__(self,
                  node_names,
                  weights: dict,
