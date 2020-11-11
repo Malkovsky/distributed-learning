@@ -5,7 +5,6 @@ from itertools import cycle
 
 
 class MasterNode:
-    # TODO: умный выбор весов from fast averaging
     def __init__(self,
                  node_names,
                  weights: dict,
@@ -21,6 +20,23 @@ class MasterNode:
                  update_params_epoch_start=0,
                  update_params_period=1,
                  verbose=1):
+        """
+        Class implementing master node in consensus network.
+        :param node_names: list of string with node's names in network
+        :param weights: topology of network graph
+        :param train_loaders: dict of train loaders, each must be iterable
+        :param test_loader:
+        :param fit_step: function witch train node.model on one part of data which take from node.train_loader.
+        :param update_params: function witch update node.model.parameters using node.weights based on node.neighbors.
+        :param calc_accuracy: function witch calculate node.model accuracy on data from test_loader
+        :param stat_step: period of statistic save
+        :param lr: gradient learning rate
+        :param epoch: number of epoch
+        :param epoch_len: number of batches in each epoch
+        :param update_params_epoch_start: the first epoch from which consensus begins
+        :param update_params_period: consensus iteration period
+        :param verbose: verbose mode
+        """
         self.node_names = node_names
 
         self.model = None
@@ -55,10 +71,24 @@ class MasterNode:
         self.debug_file = sys.stdout
 
     def _print_debug(self, msg, verbose):
+        """
+        Print msg if good verbose mode
+        :param msg: string of message
+        :param verbose: verbose mode
+        :return: self
+        """
         if verbose <= self.verbose:
             print(msg, file=self.debug_file)
+        return self
 
     def set_model(self, model, *args, **kwargs):
+        """
+        Sets self.model on given model
+        :param model: some model with interface like models in pytorch
+        :param args: other unnamed params
+        :param kwargs: other named params
+        :return: self
+        """
         self.model = model
         self.model_args = args
         self.model_kwargs = kwargs
@@ -66,6 +96,13 @@ class MasterNode:
         return self
 
     def set_optimizer(self, optimizer, *args, **kwargs):
+        """
+        Sets self optimizer on given optimizer
+        :param optimizer: some pytorch optimizer
+        :param args: other unnamed params
+        :param kwargs: other named params
+        :return: self
+        """
         self.optimizer = optimizer
         self.opt_args = args
         self.opt_kwargs = kwargs
@@ -73,6 +110,13 @@ class MasterNode:
         return self
 
     def set_error(self, error, *args, **kwargs):
+        """
+        Sets self error function on given func
+        :param error: some error function
+        :param args: other unnamed params
+        :param kwargs: other named params
+        :return: self
+        """
         self.error = error
         self.error_args = args
         self.error_kwargs = kwargs
@@ -80,6 +124,10 @@ class MasterNode:
         return self
 
     def initialize_nodes(self):
+        """
+        Initialize consensus nodes based on available information
+        :return: self
+        """
         self.network = {name: ConsensusNode(name=name,
                                             lr=self.lr,
                                             stat_step=self.stat_step,
@@ -101,6 +149,10 @@ class MasterNode:
         return self
 
     def start_consensus(self):
+        """
+        Main train function
+        :return: self
+        """
         self._print_debug(f'Master started\n', verbose=0)
         start_time = timeit.default_timer()
         for epoch in range(1, self.epoch + 1):
@@ -110,8 +162,14 @@ class MasterNode:
                               verbose=1)
 
         self._print_debug(f'Master ended in {timeit.default_timer() - start_time:.2f} sec\n', verbose=0)
+        return self
 
     def do_epoch(self, epoch):
+        """
+        Train all network one epoch
+        :param epoch: epoch number
+        :return: self
+        """
         self._print_debug(f"Epoch {epoch}:", verbose=1)
         for it in range(1, self.epoch_len + 1):
             global_iter = (epoch - 1) * self.epoch_len + it
@@ -134,3 +192,4 @@ class MasterNode:
 
                 for node_name, node in self.network.items():
                     self.update_params(node, epoch, global_iter)
+        return self

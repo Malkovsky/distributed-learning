@@ -4,7 +4,15 @@ import wide_resnet_submodule.config as cf
 import numpy as np
 
 
-def fit_batch_cifar(node, epoch, *args, **kwargs):
+def fit_batch_cifar(node, epoch: int, *args, **kwargs):
+    """
+    Train node.model on one part of data which take from node.train_loader.
+    :param node: node of ConsensusNode
+    :param epoch: epoch number
+    :param args: other unnamed params
+    :param kwargs: other named params
+    :return: nothing
+    """
     images, labels = next(node.train_loader)
 
     node.model.train()
@@ -34,6 +42,14 @@ def fit_batch_cifar(node, epoch, *args, **kwargs):
 
 
 def calc_accuracy_cifar(node, test_loader, *args, **kwargs):
+    """
+    Calculate node.model accuracy on data from test_loader
+    :param node: node of ConsensusNode
+    :param test_loader: something iterable
+    :param args: other unnamed params
+    :param kwargs: other named params
+    :return: float accuracy
+    """
     correct = 0
     total = 0
 
@@ -60,8 +76,16 @@ def calc_accuracy_cifar(node, test_loader, *args, **kwargs):
     return float(accuracy)
 
 
-def update_params_cifar(node, epoch, *args, **kwargs):
+def update_params_cifar(node, epoch: int, *args, **kwargs):
     # TODO: добавить зависимость коэф-та (сейчас 1.0) от номера эпохи
+    """
+    Update node.model.parameters using node.weights based on node.neighbors.
+    :param node: node of ConsensusNode
+    :param epoch: epoch number
+    :param args: other unnamed params
+    :param kwargs: other named params
+    :return: nothing
+    """
     for p in node.model.parameters():
         p.data *= node.weights[node.name]
 
@@ -71,17 +95,40 @@ def update_params_cifar(node, epoch, *args, **kwargs):
 
 
 def fit_step_titanic(node, *args, **kwargs):
+    """
+    Train node.model on one part of data which take from node.train_loader.
+    :param node: node of ConsensusNode
+    :param args: other unnamed params
+    :param kwargs: other named params
+    :return: nothing
+    """
     x_train, y_train = next(node.train_loader)
     train_loss = node.model.fit(x_train, y_train)
     node.loss_cum += train_loss
 
 
 def calc_accuracy_titanic(node, test_loader, *args, **kwargs):
-    x_train, y_train = test_loader
-    return node.model.calc_accuracy(x_train, y_train)
+    """
+    Calculate node.model accuracy on data from test_loader
+    :param node: node of ConsensusNode
+    :param test_loader: pair of x_test and y_test
+    :param args: other unnamed params
+    :param kwargs: other named params
+    :return: float accuracy
+        """
+    x_test, y_test = test_loader
+    return node.model.calc_accuracy(x_test, y_test)
 
 
-def update_params_titanic(node, epoch, *args, **kwargs):
+def update_params_titanic(node, epoch: int, *args, **kwargs):
+    """
+    Update node.model.parameters using node.weights based on node.neighbors.
+    :param node: node of ConsensusNode
+    :param epoch: epoch number
+    :param args: other unnamed params
+    :param kwargs: other named params
+    :return: nothing
+    """
     node.model.W *= node.weights[node.name]
 
     for node_name, params in node.parameters.items():
