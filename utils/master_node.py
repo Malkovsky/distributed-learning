@@ -181,10 +181,10 @@ class MasterNode:
 
             # training each model one step (batch for ex.)
             for node_name, node in self.network.items():
-                self.fit_step(node, epoch)
+                self.fit_step(node, epoch, use_cuda=self.use_cuda)
                 # Save stat each stat_step step
                 if global_iter % self.stat_step == 0:
-                    accuracy = self.calc_accuracy(node, self.test_loader)
+                    accuracy = self.calc_accuracy(node, self.test_loader, use_cuda=self.use_cuda)
                     node.save_accuracy(accuracy, global_iter)
                     node.save_loss(global_iter)
 
