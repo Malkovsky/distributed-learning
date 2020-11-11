@@ -19,6 +19,7 @@ class MasterNode:
                  epoch_len=391,
                  update_params_epoch_start=0,
                  update_params_period=1,
+                 use_cuda=False,
                  verbose=1):
         """
         Class implementing master node in consensus network.
@@ -35,6 +36,7 @@ class MasterNode:
         :param epoch_len: number of batches in each epoch
         :param update_params_epoch_start: the first epoch from which consensus begins
         :param update_params_period: consensus iteration period
+        :param use_cuda: set True to use CUDA
         :param verbose: verbose mode
         """
         self.node_names = node_names
@@ -66,6 +68,8 @@ class MasterNode:
         self.epoch_len: int = epoch_len
         self.update_params_epoch_start: int = update_params_epoch_start
         self.update_params_period: int = update_params_period
+
+        self.use_cuda = use_cuda
 
         self.verbose = verbose
         self.debug_file = sys.stdout
@@ -133,6 +137,7 @@ class MasterNode:
                                             stat_step=self.stat_step,
                                             weights=self.weights[name],
                                             train_loader=cycle(iter(self.train_loaders[name])),
+                                            use_cuda=self.use_cuda,
                                             verbose=self.verbose)
                         for name in self.node_names}
 

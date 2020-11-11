@@ -1,10 +1,11 @@
 import seaborn as sns
 import matplotlib.pyplot as plt
 from wide_resnet_submodule.networks import *
+import torch
+import torch.backends.cudnn as cudnn
 
 
 class ConsensusNode:
-    # TODO: поддержка  GPU
     # TODO: сохранение модели в память
     def __init__(self,
                  name: str,
@@ -12,6 +13,7 @@ class ConsensusNode:
                  train_loader,
                  lr=0.02,
                  stat_step=50,
+                 use_cuda=False,
                  verbose=0):
         """
         Class implementing consensus node in consensus network.
@@ -20,6 +22,7 @@ class ConsensusNode:
         :param train_loader: generator of train batches
         :param lr: gradient learning rate
         :param stat_step: period of statistic save
+        :param use_cuda: set True to use CUDA
         :param verbose: verbose mode
         """
         self.model = None
@@ -41,6 +44,8 @@ class ConsensusNode:
         self.loss_cum: int = 0
 
         self.stat_step: int = stat_step
+        self.use_cuda = use_cuda
+
         self.accuracy_list: list = [[], []]
         self.loss_list: list = [[], []]
 
@@ -59,15 +64,15 @@ class ConsensusNode:
         self._print_debug(f"Node {self.name}: iter {iteration}, accuracy= {accuracy:.2f}", verbose=1)
         return self
 
-    def save_loss(self, it):
+    def save_loss(self, iteration):
         """
         Saves cumulative model loss and zeroing this
-        :param it:
+        :param iteration:
         :return:
         """
         self.loss_list[0].append(self.loss_cum)
-        self.loss_list[1].append(it)
-        self._print_debug(f"Node {self.name}: iter {it}, cumulative train loss= {self.loss_cum:.2f}", verbose=1)
+        self.loss_list[1].append(iteration)
+        self._print_debug(f"Node {self.name}: iter {iteration}, cumulative train loss= {self.loss_cum:.2f}", verbose=1)
         self.loss_cum = 0.
         return self
 
@@ -91,7 +96,13 @@ class ConsensusNode:
         :return: self
         """
         self.model = model(*args, *kwargs)
-        self._print_debug(f"Node {self.name} set model={self.model} with args={args}, kwargs={kwargs}", 2)
+        if self.use_cuda:
+            self.model.cuda()
+            self.model = torch.nn.DataParallel(self.model, device_ids=range(torch.cuda.device_count()))
+            cudnn.benchmark = True
+
+        self._print_debug(f"Node {self.name} set model= {self.model} with args= {args},"
+                          f" kwargs= {kwargs}, use CUDA= {self.use_cuda}", 2)
         return self
 
     def set_optimizer(self, optimizer, *args, **kwargs):
@@ -138,7 +149,7 @@ class ConsensusNode:
 
     def show_graphs(self):
         """
-        Shows all statistics
+        Shows accuracy and train loss
         :return: nothing
         """
         fig, axs = plt.subplots(figsize=(20, 8), ncols=2)

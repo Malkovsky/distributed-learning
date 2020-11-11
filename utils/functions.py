@@ -4,16 +4,19 @@ import wide_resnet_submodule.config as cf
 import numpy as np
 
 
-def fit_batch_cifar(node, epoch: int, *args, **kwargs):
+def fit_batch_cifar(node, epoch: int, *args, use_cuda=False, **kwargs):
     """
     Train node.model on one part of data which take from node.train_loader.
     :param node: node of ConsensusNode
     :param epoch: epoch number
+    :param use_cuda: set True to use CUDA
     :param args: other unnamed params
     :param kwargs: other named params
     :return: nothing
     """
     images, labels = next(node.train_loader)
+    if use_cuda:
+        images, labels = images.cuda(), labels.cuda()
 
     node.model.train()
     node.model.training = True
@@ -41,11 +44,12 @@ def fit_batch_cifar(node, epoch: int, *args, **kwargs):
     node.loss_cum += loss.item()
 
 
-def calc_accuracy_cifar(node, test_loader, *args, **kwargs):
+def calc_accuracy_cifar(node, test_loader, *args, use_cuda=False, **kwargs):
     """
     Calculate node.model accuracy on data from test_loader
     :param node: node of ConsensusNode
     :param test_loader: something iterable
+    :param use_cuda: set True to use CUDA
     :param args: other unnamed params
     :param kwargs: other named params
     :return: float accuracy
@@ -60,6 +64,8 @@ def calc_accuracy_cifar(node, test_loader, *args, **kwargs):
         # Predict test dataset
         for images, labels in test_loader:
             test, labels = Variable(images), Variable(labels)
+            if use_cuda:
+                images, labels = images.cuda(), labels.cuda()
 
             # Forward propagation
             outputs = node.model(test)
@@ -77,7 +83,6 @@ def calc_accuracy_cifar(node, test_loader, *args, **kwargs):
 
 
 def update_params_cifar(node, epoch: int, *args, **kwargs):
-    # TODO: добавить зависимость коэф-та (сейчас 1.0) от номера эпохи
     """
     Update node.model.parameters using node.weights based on node.neighbors.
     :param node: node of ConsensusNode
