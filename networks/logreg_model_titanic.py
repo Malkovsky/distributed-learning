@@ -20,10 +20,13 @@ class LogRegTitanic:
         ]) / x_train.shape[0] + self.tau * self.W
         self.W -= self.lr * grad
 
-        train_loss = self.tau / 2 * np.sum(self.W ** 2) + -np.mean(
-            np.log(self._sigmoid(y_train * (x_train @ self.W))))
-        return train_loss
+        return self.calc_loss(x_train, y_train)
 
     def calc_accuracy(self, x_test, y_test):
         test_predictions = (self._sigmoid(x_test @ self.W) >= 0.5).astype(np.int) * 2 - 1
         return np.mean(test_predictions == y_test)
+
+    def calc_loss(self, x, y):
+        loss = self.tau / 2 * np.sum(self.W ** 2) + -np.mean(
+            np.log(self._sigmoid(y * (x @ self.W))))
+        return loss
