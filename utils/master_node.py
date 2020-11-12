@@ -2,6 +2,7 @@ from utils.consensus_node import ConsensusNode
 import sys
 import timeit
 from itertools import cycle
+from tqdm.notebook import tqdm
 
 
 class MasterNode:
@@ -160,7 +161,7 @@ class MasterNode:
         """
         self._print_debug(f'Master started\n', verbose=0)
         start_time = timeit.default_timer()
-        for epoch in range(1, self.epoch + 1):
+        for epoch in tqdm(range(1, self.epoch + 1)):
             start_epoch_time = timeit.default_timer()
             self.do_epoch(epoch)
             self._print_debug(f'Epoch {epoch} ended in {timeit.default_timer() - start_epoch_time:.2f} sec\n',
