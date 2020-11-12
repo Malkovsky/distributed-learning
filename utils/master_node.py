@@ -13,7 +13,8 @@ class MasterNode:
                  test_loader,
                  fit_step,
                  update_params,
-                 calc_accuracy,
+                 stat_funcs: dict,
+                 statistics: dict,
                  stat_step=50,
                  lr=0.02,
                  epoch=200,
@@ -30,7 +31,8 @@ class MasterNode:
         :param test_loader:
         :param fit_step: function witch train node.model on one part of data which take from node.train_loader.
         :param update_params: function witch update node.model.parameters using node.weights based on node.neighbors.
-        :param calc_accuracy: function witch calculate node.model accuracy on data from test_loader
+        :param stat_funcs: dict of statistic functions
+        :param statistics: dict for save statistics for each nodes statistics['func_name']['node_name']['values/iters/tmp']
         :param stat_step: period of statistic save
         :param lr: gradient learning rate
         :param epoch: number of epoch
@@ -56,7 +58,8 @@ class MasterNode:
 
         self.fit_step = fit_step
         self.update_params = update_params
-        self.calc_accuracy = calc_accuracy
+        self.stat_funcs: dict = stat_funcs
+        self.statistics: dict = statistics
 
         self.weights: dict = weights
         self.network = None
@@ -77,7 +80,7 @@ class MasterNode:
 
     def _print_debug(self, msg, verbose):
         """
-        Print msg if good verbose mode
+        Print msg if valid verbose mode
         :param msg: string of message
         :param verbose: verbose mode
         :return: self
@@ -97,7 +100,7 @@ class MasterNode:
         self.model = model
         self.model_args = args
         self.model_kwargs = kwargs
-        self._print_debug(f"Master set model={self.model}, args={args}, kwargs={kwargs}", 2)
+        self._print_debug(f"Master set model={self.model}, args={args}, kwargs={kwargs}", 3)
         return self
 
     def set_optimizer(self, optimizer, *args, **kwargs):
@@ -111,7 +114,7 @@ class MasterNode:
         self.optimizer = optimizer
         self.opt_args = args
         self.opt_kwargs = kwargs
-        self._print_debug(f"Master set optimizer={self.optimizer}, args={args}, kwargs={kwargs}", 2)
+        self._print_debug(f"Master set optimizer={self.optimizer}, args={args}, kwargs={kwargs}", 3)
         return self
 
     def set_error(self, error, *args, **kwargs):
@@ -125,7 +128,7 @@ class MasterNode:
         self.error = error
         self.error_args = args
         self.error_kwargs = kwargs
-        self._print_debug(f"Master set error={self.error}, args={args}, kwargs={kwargs}", 2)
+        self._print_debug(f"Master set error={self.error}, args={args}, kwargs={kwargs}", 3)
         return self
 
     def initialize_nodes(self):
@@ -135,7 +138,6 @@ class MasterNode:
         """
         self.network = {name: ConsensusNode(name=name,
                                             lr=self.lr,
-                                            stat_step=self.stat_step,
                                             weights=self.weights[name],
                                             train_loader=cycle(iter(self.train_loaders[name])),
                                             use_cuda=self.use_cuda,
@@ -182,14 +184,17 @@ class MasterNode:
 
             # training each model one step (batch for ex.)
             for node_name, node in self.network.items():
-                self.fit_step(node, epoch, use_cuda=self.use_cuda)
+                self.fit_step(self, node, epoch, use_cuda=self.use_cuda)
                 # Save stat each stat_step step
                 if global_iter % self.stat_step == 0:
-                    accuracy = self.calc_accuracy(node, self.test_loader, use_cuda=self.use_cuda)
-                    node.save_accuracy(accuracy, global_iter)
-                    node.save_loss(global_iter)
+                    for func_name, func in self.stat_funcs.items():
+                        value = func(master_node=self, node=node, epoch=epoch, iter=global_iter, use_cuda=self.use_cuda)
+                        self.statistics[func_name][node_name]['values'].append(value)
+                        self.statistics[func_name][node_name]['iters'].append(global_iter)
+                        node._print_debug(f"Node {node_name}: epoch {epoch}, iter {global_iter},"
+                                          f" {func_name}= {value:.2f}", verbose=2)
 
-            # Consensus starting from the {self.update_params_epoch_start}th epoch
+                # Consensus starting from the {self.update_params_epoch_start}th epoch
             # with a period of {self.update_params_period}
             if epoch >= self.update_params_epoch_start \
                     and global_iter % self.update_params_period == 0:

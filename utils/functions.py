@@ -4,9 +4,10 @@ import wide_resnet_submodule.config as cf
 import numpy as np
 
 
-def fit_batch_cifar(node, epoch: int, *args, use_cuda=False, **kwargs):
+def fit_batch_cifar(master_node, node, epoch: int, *args, use_cuda=False, **kwargs):
     """
     Train node.model on one part of data which take from node.train_loader.
+    :param master_node: node of MasterNode
     :param node: node of ConsensusNode
     :param epoch: epoch number
     :param use_cuda: set True to use CUDA
@@ -40,15 +41,20 @@ def fit_batch_cifar(node, epoch: int, *args, use_cuda=False, **kwargs):
 
     # Update parameters
     optimizer.step()
+    master_node.statistics['cumulative_train_loss'][node.name]['tmp'] += loss.item()
 
-    node.loss_cum += loss.item()
+
+def get_cumulative_train_loss(master_node, node, *args, **kwargs):
+    loss = master_node.statistics['cumulative_train_loss'][node.name]['tmp']
+    master_node.statistics['cumulative_train_loss'][node.name]['tmp'] = 0.0
+    return float(loss)
 
 
-def calc_accuracy_cifar(node, test_loader, *args, use_cuda=False, **kwargs):
+def calc_accuracy_cifar(master_node, node, *args, use_cuda=False, **kwargs):
     """
     Calculate node.model accuracy on data from test_loader
+    :param master_node: node of MasterNode
     :param node: node of ConsensusNode
-    :param test_loader: something iterable
     :param use_cuda: set True to use CUDA
     :param args: other unnamed params
     :param kwargs: other named params
@@ -62,7 +68,7 @@ def calc_accuracy_cifar(node, test_loader, *args, use_cuda=False, **kwargs):
 
     with torch.no_grad():
         # Predict test dataset
-        for images, labels in test_loader:
+        for images, labels in master_node.test_loader:
             test, labels = Variable(images), Variable(labels)
             if use_cuda:
                 images, labels = images.cuda(), labels.cuda()
@@ -99,9 +105,10 @@ def update_params_cifar(node, epoch: int, *args, **kwargs):
             p.data += pn.data * node.weights[node_name]
 
 
-def fit_step_titanic(node, *args, **kwargs):
+def fit_step_titanic(master_node, node, *args, **kwargs):
     """
     Train node.model on one part of data which take from node.train_loader.
+    :param master_node: node of MasterNode
     :param node: node of ConsensusNode
     :param args: other unnamed params
     :param kwargs: other named params
@@ -109,7 +116,7 @@ def fit_step_titanic(node, *args, **kwargs):
     """
     x_train, y_train = next(node.train_loader)
     train_loss = node.model.fit(x_train, y_train)
-    node.loss_cum += train_loss
+    master_node.statistics['cumulative_train_loss'][node.name]['tmp'] += train_loss
 
 
 def calc_accuracy_titanic(node, test_loader, *args, **kwargs):
