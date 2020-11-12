@@ -191,10 +191,10 @@ class MasterNode:
                         value = func(master_node=self, node=node, epoch=epoch, iter=global_iter, use_cuda=self.use_cuda)
                         self.statistics[func_name][node_name]['values'].append(value)
                         self.statistics[func_name][node_name]['iters'].append(global_iter)
-                        node._print_debug(f"Node {node_name}: epoch {epoch}, iter {global_iter},"
+                        self._print_debug(f"Node {node_name}: epoch {epoch}, iter {global_iter},"
                                           f" {func_name}= {value:.2f}", verbose=2)
 
-                # Consensus starting from the {self.update_params_epoch_start}th epoch
+            # Consensus starting from the {self.update_params_epoch_start}th epoch
             # with a period of {self.update_params_period}
             if epoch >= self.update_params_epoch_start \
                     and global_iter % self.update_params_period == 0:
