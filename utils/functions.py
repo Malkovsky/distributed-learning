@@ -119,16 +119,16 @@ def fit_step_titanic(master_node, node, *args, **kwargs):
     master_node.statistics['cumulative_train_loss'][node.name]['tmp'] += train_loss
 
 
-def calc_accuracy_titanic(node, test_loader, *args, **kwargs):
+def calc_accuracy_titanic(master_node, node, *args, **kwargs):
     """
     Calculate node.model accuracy on data from test_loader
+    :param master_node: node of MasterNode
     :param node: node of ConsensusNode
-    :param test_loader: pair of x_test and y_test
     :param args: other unnamed params
     :param kwargs: other named params
     :return: float accuracy
         """
-    x_test, y_test = test_loader
+    x_test, y_test = master_node.test_loader
     return node.model.calc_accuracy(x_test, y_test)
 
 
