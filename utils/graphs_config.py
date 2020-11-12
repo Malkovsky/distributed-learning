@@ -1,5 +1,6 @@
 from collections import defaultdict
 from math import isclose
+from utils.fast_averaging import find_optimal_weights
 
 ABC_3 = {'Alice':   {'Alice': 0.34, 'Bob': 0.33, 'Charlie': 0.33},
          'Bob':     {'Alice': 0.33, 'Bob': 0.34, 'Charlie': 0.33},
@@ -54,15 +55,19 @@ def adj2edges(graph: dict) -> set:
 def edges2topology(edges: list, weights: list = None) -> dict:
     """
     Converts the edges of a graph to an adjacency list with edge weights.
+    If no weights are given then it takes them from utils.fast_averaging.find_optimal_weights
     Normalizes all edge sums to 1.0 for each vertices.
     The graph must be undirected.
     :param edges: list of edges (v, u)
     :param weights: list of edge weights
     :return: adjacency list, where graph[v] - adjacency list for vertex v, graph[v][u] - weight for edge (v, u)
     """
-    if weights:
-        assert (len(edges) == len(weights)),\
-            f"The number of edges= {len(edges)}, the number of weights= {len(weights)}, but must be equal."
+    if not weights:
+        weights, _ = find_optimal_weights(edges)
+        weights = list(weights)
+
+    assert (len(edges) == len(weights)),\
+        f"The number of edges= {len(edges)}, the number of weights= {len(weights)}, but must be equal."
 
     graph = defaultdict(dict)
     sums = defaultdict(float)
