@@ -2,6 +2,7 @@ from utils.consensus_node import ConsensusNode
 import sys
 import timeit
 from itertools import cycle
+from tqdm.notebook import tqdm
 
 
 class MasterNode:
@@ -12,13 +13,15 @@ class MasterNode:
                  test_loader,
                  fit_step,
                  update_params,
-                 calc_accuracy,
+                 stat_funcs: dict,
+                 statistics: dict,
                  stat_step=50,
                  lr=0.02,
                  epoch=200,
                  epoch_len=391,
                  update_params_epoch_start=0,
                  update_params_period=1,
+                 use_cuda=False,
                  verbose=1):
         """
         Class implementing master node in consensus network.
@@ -28,13 +31,15 @@ class MasterNode:
         :param test_loader:
         :param fit_step: function witch train node.model on one part of data which take from node.train_loader.
         :param update_params: function witch update node.model.parameters using node.weights based on node.neighbors.
-        :param calc_accuracy: function witch calculate node.model accuracy on data from test_loader
+        :param stat_funcs: dict of statistic functions
+        :param statistics: dict for save statistics for each nodes statistics['func_name']['node_name']['values/iters/tmp']
         :param stat_step: period of statistic save
         :param lr: gradient learning rate
         :param epoch: number of epoch
         :param epoch_len: number of batches in each epoch
         :param update_params_epoch_start: the first epoch from which consensus begins
         :param update_params_period: consensus iteration period
+        :param use_cuda: set True to use CUDA
         :param verbose: verbose mode
         """
         self.node_names = node_names
@@ -53,7 +58,8 @@ class MasterNode:
 
         self.fit_step = fit_step
         self.update_params = update_params
-        self.calc_accuracy = calc_accuracy
+        self.stat_funcs: dict = stat_funcs
+        self.statistics: dict = statistics
 
         self.weights: dict = weights
         self.network = None
@@ -67,12 +73,14 @@ class MasterNode:
         self.update_params_epoch_start: int = update_params_epoch_start
         self.update_params_period: int = update_params_period
 
+        self.use_cuda = use_cuda
+
         self.verbose = verbose
         self.debug_file = sys.stdout
 
     def _print_debug(self, msg, verbose):
         """
-        Print msg if good verbose mode
+        Print msg if valid verbose mode
         :param msg: string of message
         :param verbose: verbose mode
         :return: self
@@ -92,7 +100,7 @@ class MasterNode:
         self.model = model
         self.model_args = args
         self.model_kwargs = kwargs
-        self._print_debug(f"Master set model={self.model}, args={args}, kwargs={kwargs}", 2)
+        self._print_debug(f"Master set model={self.model}, args={args}, kwargs={kwargs}", 3)
         return self
 
     def set_optimizer(self, optimizer, *args, **kwargs):
@@ -106,7 +114,7 @@ class MasterNode:
         self.optimizer = optimizer
         self.opt_args = args
         self.opt_kwargs = kwargs
-        self._print_debug(f"Master set optimizer={self.optimizer}, args={args}, kwargs={kwargs}", 2)
+        self._print_debug(f"Master set optimizer={self.optimizer}, args={args}, kwargs={kwargs}", 3)
         return self
 
     def set_error(self, error, *args, **kwargs):
@@ -120,7 +128,7 @@ class MasterNode:
         self.error = error
         self.error_args = args
         self.error_kwargs = kwargs
-        self._print_debug(f"Master set error={self.error}, args={args}, kwargs={kwargs}", 2)
+        self._print_debug(f"Master set error={self.error}, args={args}, kwargs={kwargs}", 3)
         return self
 
     def initialize_nodes(self):
@@ -130,9 +138,9 @@ class MasterNode:
         """
         self.network = {name: ConsensusNode(name=name,
                                             lr=self.lr,
-                                            stat_step=self.stat_step,
                                             weights=self.weights[name],
                                             train_loader=cycle(iter(self.train_loaders[name])),
+                                            use_cuda=self.use_cuda,
                                             verbose=self.verbose)
                         for name in self.node_names}
 
@@ -155,7 +163,7 @@ class MasterNode:
         """
         self._print_debug(f'Master started\n', verbose=0)
         start_time = timeit.default_timer()
-        for epoch in range(1, self.epoch + 1):
+        for epoch in tqdm(range(1, self.epoch + 1)):
             start_epoch_time = timeit.default_timer()
             self.do_epoch(epoch)
             self._print_debug(f'Epoch {epoch} ended in {timeit.default_timer() - start_epoch_time:.2f} sec\n',
@@ -176,12 +184,15 @@ class MasterNode:
 
             # training each model one step (batch for ex.)
             for node_name, node in self.network.items():
-                self.fit_step(node, epoch)
+                self.fit_step(self, node, epoch, use_cuda=self.use_cuda)
                 # Save stat each stat_step step
                 if global_iter % self.stat_step == 0:
-                    accuracy = self.calc_accuracy(node, self.test_loader)
-                    node.save_accuracy(accuracy, global_iter)
-                    node.save_loss(global_iter)
+                    for func_name, func in self.stat_funcs.items():
+                        value = func(master_node=self, node=node, epoch=epoch, iter=global_iter, use_cuda=self.use_cuda)
+                        self.statistics[func_name][node_name]['values'].append(value)
+                        self.statistics[func_name][node_name]['iters'].append(global_iter)
+                        self._print_debug(f"Node {node_name}: epoch {epoch}, iter {global_iter},"
+                                          f" {func_name}= {value:.2f}", verbose=2)
 
             # Consensus starting from the {self.update_params_epoch_start}th epoch
             # with a period of {self.update_params_period}
