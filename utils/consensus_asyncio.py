@@ -130,7 +130,6 @@ class ConsensusNetwork:
                 self._debug('===== SHUTDOWN =====')
                 for token, (r, w) in self.agents_sockets.items():
                     await w.put(SHUTDOWN)
-                self.shutdown_q.task_done()
                 break
             
             for token, monitor in monitor_agents.items():
@@ -154,9 +153,6 @@ class ConsensusNetwork:
                         self.agent_converged[token] = False
                     else:
                         self._debug(f'got unexpected request from "{token}": {req}')
-                    
-                    r, _ = self.agents_sockets[token]
-                    r.task_done()
                     
             for t in pending:
                 t.cancel()
@@ -189,6 +185,8 @@ class ConsensusAgent:
         self.convergence_eps = convergence_eps
         self.debug = debug
         
+        self.round_counter = 0
+        
     def _debug(self, *args, **kwargs):
         if self.debug:
             if 'file' not in kwargs.keys():
@@ -209,27 +207,19 @@ class ConsensusAgent:
         self._debug(f'got consensus epsilon from master: {self.consensus_eps}')
     
     async def run_round(self, value, weight):
+        self.round_counter += 1
         self._debug(f'running new round with v={value}, w={weight}')
         if not self.network_ready:
             self._debug('initialized. Waiting for NETWORK_READY')
             rdy = await self.master_sockets[0].get()
             self._debug(f'got {rdy}')
-            self.master_sockets[0].task_done()
             self.network_ready = rdy == NETWORK_READY
             if not self.network_ready:
                 return rdy
         
-        # clear queues in case DONE was transmitted in the middle of the previous round
-        self._debug('clearing queues')
-        for token, (r, w) in self.neighbor_sockets.items():
-            while r.qsize() > 0:
-                r.get_nowait()
-                r.task_done()
-        
         self._debug('sending NEW_ROUND to master')
         await self.master_sockets[1].put((NEW_ROUND, weight))
         resp = await self.master_sockets[0].get()
-        self.master_sockets[0].task_done()
         if not isinstance(resp, tuple) or resp[0] != NEW_ROUND:
             return resp
         mean_weight = resp[1]
@@ -240,18 +230,17 @@ class ConsensusAgent:
         done_flag = False
         y = value * weight / mean_weight
         neighbor_count = len(self.neighbor_sockets.keys())
-
+        
         while not done_flag:
             self._debug('requesting values from neighbors')
             for token, (r, w) in self.neighbor_sockets.items():
-                await w.put(REQUEST_VALUE)
+                await w.put((REQUEST_VALUE, self.round_counter))
 
             neighbor_values = {}
 
             while len(neighbor_values.keys()) != neighbor_count:
                 if self.master_sockets[0].qsize() > 0:
                     res = self.master_sockets[0].get_nowait()
-                    self.master_sockets[0].task_done()
                     if res == DONE:
                         self._debug('got DONE from master!!!')
                         done_flag = True
@@ -270,7 +259,6 @@ class ConsensusAgent:
                     t.cancel()
                 if monitor_master in done:
                     res = monitor_master.result()
-                    self.master_sockets[0].task_done()
                     if res == DONE:
                         self._debug('got DONE from master!!!')
                         done_flag = True
@@ -283,16 +271,17 @@ class ConsensusAgent:
                     if task in done:
                         res = task.result()
                         r, w = self.neighbor_sockets[token]
-                        r.task_done()
-                        if isinstance(res, str):
-                            if res == REQUEST_VALUE:
-                                self._debug(f'sending values to "{token}"')
-                                await w.put(y)
-                            else:
-                                self._debug(f'got unexpected request from "{token}": {res}')
+                        if not isinstance(res, tuple) or len(res) < 2:
+                            self._debug(f'got unexpected request from "{token}": {res}')
+                        if res[1] != self.round_counter:
+                            self._debug(f'! got request/response from "{token}" from previous round: {res}')
+                            continue
+                        if isinstance(res[0], str) and res[0] == REQUEST_VALUE:                        
+                            self._debug(f'sending values to "{token}"')
+                            await w.put((y, self.round_counter))
                         else: # consider it a value
                             self._debug(f'got value from "{token}": {res}!')
-                            neighbor_values[token] = res
+                            neighbor_values[token] = res[0]
                             
             if done_flag: break
 
@@ -305,7 +294,7 @@ class ConsensusAgent:
                 
             y = y * (1 - self.consensus_eps * neighbor_count) + self.consensus_eps * np.sum(list(neighbor_values.values()), axis=0)
             
-            c = np.all([ np.isclose(y, v, rtol=self.convergence_eps) for v in neighbor_values.values()])
+            c = np.all([ (y - v) <= self.convergence_eps for v in neighbor_values.values()])
             
             self._debug(f'updated value = {y}, c={c}')
             
