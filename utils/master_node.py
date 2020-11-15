@@ -1,8 +1,10 @@
 from utils.consensus_node import ConsensusNode
 import sys
 import timeit
-from itertools import cycle
+from itertools import cycle, chain
 from tqdm.notebook import tqdm
+from math import sqrt
+import numpy as np
 
 
 class MasterNode:
@@ -203,4 +205,23 @@ class MasterNode:
 
                 for node_name, node in self.network.items():
                     self.update_params(node, epoch, global_iter)
+
+            # Save weight difference statistics
+            if global_iter % self.stat_step == 0:
+                self._calc_params_diff(global_iter, epoch)
         return self
+
+    def _calc_params_diff(self, global_iter, epoch):
+        average = None
+        params = {}
+        for node_name, node in self.network.items():
+            params[node_name] = np.array(list(chain.from_iterable([p.data.flatten() for p in node.get_params()])))
+            average = params[node_name] if average is None else average + params[node_name]
+        average /= len(self.network)
+
+        for node_name, node in self.network.items():
+            value = np.linalg.norm(params[node_name] - average)
+            self.statistics['param_diff'][node_name]['values'].append(value)
+            self.statistics['param_diff'][node_name]['iters'].append(global_iter)
+            self._print_debug(f"Node {node_name}: epoch {epoch}, iter {global_iter},"
+                              f" param_diff= {value:.2f}", verbose=2)
