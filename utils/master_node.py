@@ -200,8 +200,8 @@ class MasterNode:
 
             # Save weight difference statistics
             if global_iter % self.stat_step == 0:
-                self._calc_params_diff(global_iter, epoch)
-                
+                self._calc_params_diff(global_iter + self.stat_step // 2, epoch)
+
             for node_name, node in self.network.items():
                 # Save stat each stat_step step
                 if global_iter % self.stat_step == 0:
@@ -219,7 +219,8 @@ class MasterNode:
         average = None
         params = {}
         for node_name, node in self.network.items():
-            params[node_name] = np.array(list(chain.from_iterable([p.data.flatten() for p in node.get_params()])))
+            params[node_name] = node.get_params()
+            # params[node_name] = np.array(list(chain.from_iterable([p.data.flatten() for p in node.get_params()])))
             average = params[node_name] if average is None else average + params[node_name]
         average /= len(self.network)
 
