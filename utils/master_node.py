@@ -187,14 +187,6 @@ class MasterNode:
             # training each model one step (batch for ex.)
             for node_name, node in self.network.items():
                 self.fit_step(self, node, epoch, use_cuda=self.use_cuda)
-                # Save stat each stat_step step
-                if global_iter % self.stat_step == 0:
-                    for func_name, func in self.stat_funcs.items():
-                        value = func(master_node=self, node=node, epoch=epoch, iter=global_iter, use_cuda=self.use_cuda)
-                        self.statistics[func_name][node_name]['values'].append(value)
-                        self.statistics[func_name][node_name]['iters'].append(global_iter)
-                        self._print_debug(f"Node {node_name}: epoch {epoch}, iter {global_iter},"
-                                          f" {func_name}= {value:.2f}", verbose=2)
 
             # Consensus starting from the {self.update_params_epoch_start}th epoch
             # with a period of {self.update_params_period}
@@ -209,6 +201,18 @@ class MasterNode:
             # Save weight difference statistics
             if global_iter % self.stat_step == 0:
                 self._calc_params_diff(global_iter, epoch)
+                
+            for node_name, node in self.network.items():
+                # Save stat each stat_step step
+                if global_iter % self.stat_step == 0:
+                    for func_name, func in self.stat_funcs.items():
+                        value = func(master_node=self, node=node, epoch=epoch, iter=global_iter,
+                                     use_cuda=self.use_cuda)
+                        self.statistics[func_name][node_name]['values'].append(value)
+                        self.statistics[func_name][node_name]['iters'].append(global_iter)
+                        self._print_debug(f"Node {node_name}: epoch {epoch}, iter {global_iter},"
+                                          f" {func_name}= {value:.2f}", verbose=2)
+
         return self
 
     def _calc_params_diff(self, global_iter, epoch):
