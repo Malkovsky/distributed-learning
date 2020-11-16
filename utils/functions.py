@@ -2,6 +2,7 @@ import torch
 from torch.autograd import Variable
 import wide_resnet_submodule.config as cf
 import numpy as np
+from itertools import chain
 
 
 def fit_batch_cifar(master_node, node, epoch: int, *args, use_cuda=False, **kwargs):
