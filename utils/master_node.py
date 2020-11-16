@@ -3,6 +3,7 @@ import sys
 import timeit
 from itertools import cycle
 from tqdm.notebook import tqdm
+import numpy as np
 
 
 class MasterNode:
@@ -196,15 +197,26 @@ class MasterNode:
                 for node_name, node in self.network.items():
                     self.update_params(node, epoch, global_iter)
 
-            for node_name, node in self.network.items():
-                # Save stat each stat_step step
-                if global_iter % self.stat_step == 0:
+            # Save stat each stat_step step
+            if global_iter % self.stat_step == 0:
+                for node_name, node in self.network.items():
                     for func_name, func in self.stat_funcs.items():
                         value = func(master_node=self, node=node, epoch=epoch, iter=global_iter,
                                      use_cuda=self.use_cuda)
                         self.statistics[func_name][node_name]['values'].append(value)
                         self.statistics[func_name][node_name]['iters'].append(global_iter)
+                        if func_name != 'param_dev':
+                            self._print_debug(f"Node {node_name}: epoch {epoch}, iter {global_iter},"
+                                              f" {func_name}= {value:.2f}", verbose=2)
+
+                # Calculate parameter deviation
+                if 'param_dev' in self.stat_funcs:
+                    average_params = sum([self.statistics['param_dev'][node_name]['values'][-1]
+                                          for node_name in self.network]) / len(self.network)
+                    for node_name, node in self.network.items():
+                        value = np.linalg.norm(self.statistics['param_dev'][node_name]['values'][-1] - average_params)
+                        self.statistics['param_dev'][node_name]['values'][-1] = value
                         self._print_debug(f"Node {node_name}: epoch {epoch}, iter {global_iter},"
-                                          f" {func_name}= {value:.2f}", verbose=2)
+                                          f" param_dev= {value:.2f}", verbose=2)
 
         return self

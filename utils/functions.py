@@ -105,6 +105,18 @@ def update_params_cifar(node, epoch: int, *args, **kwargs):
             p.data += pn.data * node.weights[node_name]
 
 
+def get_flat_params_cifar(master_node, node, *args, **kwargs):
+    """
+    Get flattened array of model weights.
+    :param master_node: node of MasterNode
+    :param node: node of ConsensusNode
+    :param args: other unnamed params
+    :param kwargs: other named params
+    :return: np.array parameters
+    """
+    return np.array(list(chain.from_iterable([p.data.flatten() for p in node.get_params()])))
+
+
 def fit_step_titanic(master_node, node, *args, **kwargs):
     """
     Train node.model on one part of data which take from node.train_loader.
@@ -145,3 +157,15 @@ def update_params_titanic(node, epoch: int, *args, **kwargs):
 
     for node_name, params in node.parameters.items():
         node.model.W += params * node.weights[node_name]
+
+
+def get_flat_params_titanic(master_node, node, *args, **kwargs):
+    """
+    Get flattened array of model weights.
+    :param master_node: node of MasterNode
+    :param node: node of ConsensusNode
+    :param args: other unnamed params
+    :param kwargs: other named params
+    :return: np.array parameters
+    """
+    return node.get_params()
