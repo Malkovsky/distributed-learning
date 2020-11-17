@@ -16,7 +16,6 @@ class MasterNode:
                  update_params,
                  stat_funcs: dict,
                  statistics: dict,
-                 stat_step=50,
                  lr=0.02,
                  epoch=200,
                  epoch_len=391,
@@ -34,7 +33,6 @@ class MasterNode:
         :param update_params: function witch update node.model.parameters using node.weights based on node.neighbors.
         :param stat_funcs: dict of statistic functions
         :param statistics: dict for save statistics for each nodes statistics['func_name']['node_name']['values/iters/tmp']
-        :param stat_step: period of statistic save
         :param lr: gradient learning rate
         :param epoch: number of epoch
         :param epoch_len: number of batches in each epoch
@@ -68,7 +66,6 @@ class MasterNode:
         self.train_loaders = train_loaders
         self.test_loader = test_loader
 
-        self.stat_step = stat_step
         self.epoch: int = epoch
         self.epoch_len: int = epoch_len
         self.update_params_epoch_start: int = update_params_epoch_start
@@ -197,26 +194,25 @@ class MasterNode:
                 for node_name, node in self.network.items():
                     self.update_params(node, epoch, global_iter)
 
-            # Save stat each stat_step step
-            if global_iter % self.stat_step == 0:
-                for node_name, node in self.network.items():
-                    for func_name, func in self.stat_funcs.items():
-                        value = func(master_node=self, node=node, epoch=epoch, iter=global_iter,
-                                     use_cuda=self.use_cuda)
-                        self.statistics[func_name][node_name]['values'].append(value)
-                        self.statistics[func_name][node_name]['iters'].append(global_iter)
-                        if func_name != 'param_dev':
-                            self._print_debug(f"Node {node_name}: epoch {epoch}, iter {global_iter},"
-                                              f" {func_name}= {value:.2f}", verbose=2)
+        # Save stat each epoch
+        for node_name, node in self.network.items():
+            for func_name, func in self.stat_funcs.items():
+                value = func(master_node=self, node=node, epoch=epoch,
+                             use_cuda=self.use_cuda)
+                self.statistics[func_name][node_name]['values'].append(value)
+                self.statistics[func_name][node_name]['iters'].append(epoch)
+                if func_name != 'param_dev':
+                    self._print_debug(f"Node {node_name}: epoch {epoch}, iter {global_iter},"
+                                      f" {func_name}= {value:.2f}", verbose=2)
 
-                # Calculate parameter deviation
-                if 'param_dev' in self.stat_funcs:
-                    average_params = sum([self.statistics['param_dev'][node_name]['values'][-1]
-                                          for node_name in self.network]) / len(self.network)
-                    for node_name, node in self.network.items():
-                        value = np.linalg.norm(self.statistics['param_dev'][node_name]['values'][-1] - average_params)
-                        self.statistics['param_dev'][node_name]['values'][-1] = value
-                        self._print_debug(f"Node {node_name}: epoch {epoch}, iter {global_iter},"
-                                          f" param_dev= {value:.2f}", verbose=2)
+        # Calculate parameter deviation
+        if 'param_dev' in self.stat_funcs:
+            average_params = sum([self.statistics['param_dev'][node_name]['values'][-1]
+                                  for node_name in self.network]) / len(self.network)
+            for node_name, node in self.network.items():
+                value = np.linalg.norm(self.statistics['param_dev'][node_name]['values'][-1] - average_params)
+                self.statistics['param_dev'][node_name]['values'][-1] = value
+                self._print_debug(f"Node {node_name}: epoch {epoch}, iter {global_iter},"
+                                  f" param_dev= {value:.2f}", verbose=2)
 
         return self
