@@ -106,7 +106,7 @@ def update_params_cifar(node, epoch: int, *args, **kwargs):
             p.data += pn.data * node.weights[node_name]
 
 
-def get_flat_params_cifar(master_node, node, *args, **kwargs):
+def get_flat_params_cifar(master_node, node, *args, use_cuda=False, **kwargs):
     """
     Get flattened array of model weights.
     :param master_node: node of MasterNode
@@ -115,6 +115,8 @@ def get_flat_params_cifar(master_node, node, *args, **kwargs):
     :param kwargs: other named params
     :return: np.array parameters
     """
+    if use_cuda:
+        return np.array(list(chain.from_iterable([p.data.cpu().flatten() for p in node.get_params()])))
     return np.array(list(chain.from_iterable([p.data.flatten() for p in node.get_params()])))
 
 
