@@ -3,6 +3,8 @@ import sys
 import timeit
 from itertools import cycle
 from tqdm.notebook import tqdm
+import torch
+import os
 
 
 class MasterNode:
@@ -22,6 +24,8 @@ class MasterNode:
                  update_params_epoch_start=0,
                  update_params_period=1,
                  use_cuda=False,
+                 resume_path=None,
+                 model_save_session=None,
                  verbose=1):
         """
         Class implementing master node in consensus network.
@@ -40,6 +44,8 @@ class MasterNode:
         :param update_params_epoch_start: the first epoch from which consensus begins
         :param update_params_period: consensus iteration period
         :param use_cuda: set True to use CUDA
+        :param resume_path: path to saved models
+        :param model_save_session: unique session identifier
         :param verbose: verbose mode
         """
         self.node_names = node_names
@@ -74,6 +80,8 @@ class MasterNode:
         self.update_params_period: int = update_params_period
 
         self.use_cuda = use_cuda
+        self.resume_path = resume_path
+        self.model_save_session = model_save_session
 
         self.verbose = verbose
         self.debug_file = sys.stdout
@@ -131,6 +139,29 @@ class MasterNode:
         self._print_debug(f"Master set error={self.error}, args={args}, kwargs={kwargs}", 3)
         return self
 
+    def save_models(self, epoch: int, *args, **kwargs):
+        """
+        Saves model params
+        :param epoch: epoch number
+        :param args: other unnamed params
+        :param kwargs: other named params
+        :return: self
+        """
+        if not self.model_save_session:
+            return self
+        self._print_debug('Saving models...', verbose=1)
+        path = './checkpoint/' + self.model_save_session + os.sep
+        if not os.path.exists(path):
+            os.makedirs(path)
+
+        for node_name, node in self.network.items():
+            state = {
+                'model': node.model.module if self.use_cuda else node.model,
+                'epoch': epoch,
+            }
+            torch.save(state, path + node_name + '.t7')
+        return self
+
     def initialize_nodes(self):
         """
         Initialize consensus nodes based on available information
@@ -145,7 +176,10 @@ class MasterNode:
                         for name in self.node_names}
 
         for node_name, node in self.network.items():
-            if self.model:
+            if self.resume_path:
+                path = self.resume_path + os.sep + node_name + '.t7'
+                node.set_model(self.model, resume_path=path)
+            elif self.model:
                 node.set_model(self.model, *self.model_args, **self.model_kwargs)
             if self.optimizer:
                 node.set_optimizer(self.optimizer, *self.opt_args, **self.opt_kwargs)
@@ -166,6 +200,7 @@ class MasterNode:
         for epoch in tqdm(range(1, self.epoch + 1)):
             start_epoch_time = timeit.default_timer()
             self.do_epoch(epoch)
+            self.save_models(epoch=epoch)
             self._print_debug(f'Epoch {epoch} ended in {timeit.default_timer() - start_epoch_time:.2f} sec\n',
                               verbose=1)
 
