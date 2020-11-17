@@ -46,7 +46,7 @@ def fit_batch_cifar(master_node, node, epoch: int, *args, use_cuda=False, **kwar
 
 
 def get_cumulative_train_loss(master_node, node, *args, **kwargs):
-    loss = master_node.statistics['cumulative_train_loss'][node.name]['tmp']
+    loss = master_node.statistics['cumulative_train_loss'][node.name]['tmp'] / master_node.stat_step
     master_node.statistics['cumulative_train_loss'][node.name]['tmp'] = 0.0
     return float(loss)
 
