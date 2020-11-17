@@ -2,6 +2,7 @@ import torch
 from torch.autograd import Variable
 import wide_resnet_submodule.config as cf
 import numpy as np
+from itertools import chain
 
 
 def fit_batch_cifar(master_node, node, epoch: int, *args, use_cuda=False, **kwargs):
@@ -45,7 +46,7 @@ def fit_batch_cifar(master_node, node, epoch: int, *args, use_cuda=False, **kwar
 
 
 def get_cumulative_train_loss(master_node, node, *args, **kwargs):
-    loss = master_node.statistics['cumulative_train_loss'][node.name]['tmp']
+    loss = master_node.statistics['cumulative_train_loss'][node.name]['tmp'] / master_node.epoch_len
     master_node.statistics['cumulative_train_loss'][node.name]['tmp'] = 0.0
     return float(loss)
 
@@ -105,6 +106,20 @@ def update_params_cifar(node, epoch: int, *args, **kwargs):
             p.data += pn.data * node.weights[node_name]
 
 
+def get_flat_params_cifar(master_node, node, *args, use_cuda=False, **kwargs):
+    """
+    Get flattened array of model weights.
+    :param master_node: node of MasterNode
+    :param node: node of ConsensusNode
+    :param args: other unnamed params
+    :param kwargs: other named params
+    :return: np.array parameters
+    """
+    if use_cuda:
+        return np.array(list(chain.from_iterable([p.data.cpu().flatten() for p in node.get_params()])))
+    return np.array(list(chain.from_iterable([p.data.flatten() for p in node.get_params()])))
+
+
 def fit_step_titanic(master_node, node, *args, **kwargs):
     """
     Train node.model on one part of data which take from node.train_loader.
@@ -145,3 +160,15 @@ def update_params_titanic(node, epoch: int, *args, **kwargs):
 
     for node_name, params in node.parameters.items():
         node.model.W += params * node.weights[node_name]
+
+
+def get_flat_params_titanic(master_node, node, *args, **kwargs):
+    """
+    Get flattened array of model weights.
+    :param master_node: node of MasterNode
+    :param node: node of ConsensusNode
+    :param args: other unnamed params
+    :param kwargs: other named params
+    :return: np.array parameters
+    """
+    return node.get_params()
