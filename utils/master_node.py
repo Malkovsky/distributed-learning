@@ -3,6 +3,10 @@ import sys
 import timeit
 from itertools import cycle
 from tqdm.notebook import tqdm
+import torch
+import os
+import numpy as np
+import pickle5 as pickle
 
 
 class MasterNode:
@@ -13,15 +17,15 @@ class MasterNode:
                  test_loader,
                  fit_step,
                  update_params,
-                 stat_funcs: dict,
-                 statistics: dict,
-                 stat_step=50,
                  lr=0.02,
                  epoch=200,
                  epoch_len=391,
                  update_params_epoch_start=0,
                  update_params_period=1,
                  use_cuda=False,
+                 resume_path=None,
+                 save_path='./checkpoint/',
+                 session=None,
                  verbose=1):
         """
         Class implementing master node in consensus network.
@@ -31,15 +35,14 @@ class MasterNode:
         :param test_loader:
         :param fit_step: function witch train node.model on one part of data which take from node.train_loader.
         :param update_params: function witch update node.model.parameters using node.weights based on node.neighbors.
-        :param stat_funcs: dict of statistic functions
-        :param statistics: dict for save statistics for each nodes statistics['func_name']['node_name']['values/iters/tmp']
-        :param stat_step: period of statistic save
         :param lr: gradient learning rate
         :param epoch: number of epoch
         :param epoch_len: number of batches in each epoch
         :param update_params_epoch_start: the first epoch from which consensus begins
         :param update_params_period: consensus iteration period
         :param use_cuda: set True to use CUDA
+        :param resume_path: path to saved models
+        :param session: unique session identifier
         :param verbose: verbose mode
         """
         self.node_names = node_names
@@ -58,8 +61,9 @@ class MasterNode:
 
         self.fit_step = fit_step
         self.update_params = update_params
-        self.stat_funcs: dict = stat_funcs
-        self.statistics: dict = statistics
+
+        self.stat_funcs = None
+        self.statistics = None
 
         self.weights: dict = weights
         self.network = None
@@ -67,13 +71,15 @@ class MasterNode:
         self.train_loaders = train_loaders
         self.test_loader = test_loader
 
-        self.stat_step = stat_step
         self.epoch: int = epoch
         self.epoch_len: int = epoch_len
         self.update_params_epoch_start: int = update_params_epoch_start
         self.update_params_period: int = update_params_period
 
         self.use_cuda = use_cuda
+        self.resume_path = resume_path
+        self.save_path = save_path
+        self.session = session
 
         self.verbose = verbose
         self.debug_file = sys.stdout
@@ -131,6 +137,83 @@ class MasterNode:
         self._print_debug(f"Master set error={self.error}, args={args}, kwargs={kwargs}", 3)
         return self
 
+    def set_stats(self, stat_funcs=None, statistics=None, *args, **kwargs):
+        """
+        Sets self stat_funcs and self statistics on stat_funcs and statistics or loads it from self.resume_path
+        :param stat_funcs: dict of statistic functions
+        :param statistics: dict for saving statistics for each nodes: statistics['func_name']['node_name']['values/epoch/tmp']
+        :param args: ther unnamed params
+        :param kwargs: other named params
+        :return: self
+        """
+        if self.resume_path:
+            path = self.resume_path + os.sep
+
+            with open(path + 'stat_funcs.pickle', 'rb') as f:
+                self.stat_funcs = pickle.load(f)
+
+            with open(path + 'statistics.pickle', 'rb') as f:
+                self.statistics = pickle.load(f)
+
+            self._print_debug(f'Master successfully loads stat_funcs={self.stat_funcs.keys()} from {self.resume_path}',
+                              verbose=3)
+            self._print_debug(f'Master successfully loads statistics={self.statistics.keys()} from {self.resume_path}',
+                              verbose=3)
+
+        elif stat_funcs and statistics:
+            self.stat_funcs = stat_funcs
+            self.statistics = statistics
+            self._print_debug(f'Master set stat_funcs={self.stat_funcs.keys()}', verbose=3)
+            self._print_debug(f'Master set statistics={self.statistics.keys()}', verbose=3)
+        else:
+            self._print_debug('Error! stat_funcs or statistics not found!', verbose=0)
+            exit(-1)
+
+        return self
+
+    def save_stats(self, *args, **kwargs):
+        """
+        Saves all statistics to self.save_path/self.session/
+        :return: self
+        """
+        if not self.session:
+            return self
+        self._print_debug('Saving stats...', verbose=1)
+        path = self.save_path + self.session + os.sep
+        if not os.path.exists(path):
+            os.makedirs(path)
+
+        with open(path + 'stat_funcs.pickle', 'wb') as f:
+            pickle.dump(self.stat_funcs, f)
+        with open(path + 'statistics.pickle', 'wb') as f:
+            pickle.dump(self.statistics, f)
+        return self
+
+    def save_models(self, epoch: int, *args, **kwargs):
+        """
+        Saves model params
+        :param epoch: epoch number
+        :param args: other unnamed params
+        :param kwargs: other named params
+        :return: self
+        """
+        if not self.session:
+            return self
+        self._print_debug('Saving models...', verbose=1)
+        path = self.save_path + self.session + os.sep
+        if not os.path.exists(path):
+            os.makedirs(path)
+
+        with open(path + 'epoch.pickle', 'wb') as f:
+            pickle.dump(epoch, f)
+
+        for node_name, node in self.network.items():
+            state = {
+                'model': node.model.module if self.use_cuda else node.model,
+            }
+            torch.save(state, path + node_name + '.t7')
+        return self
+
     def initialize_nodes(self):
         """
         Initialize consensus nodes based on available information
@@ -145,7 +228,10 @@ class MasterNode:
                         for name in self.node_names}
 
         for node_name, node in self.network.items():
-            if self.model:
+            if self.resume_path:
+                path = self.resume_path + os.sep + node_name + '.t7'
+                node.set_model(self.model, resume_path=path)
+            elif self.model:
                 node.set_model(self.model, *self.model_args, **self.model_kwargs)
             if self.optimizer:
                 node.set_optimizer(self.optimizer, *self.opt_args, **self.opt_kwargs)
@@ -163,9 +249,17 @@ class MasterNode:
         """
         self._print_debug(f'Master started\n', verbose=0)
         start_time = timeit.default_timer()
-        for epoch in tqdm(range(1, self.epoch + 1)):
+        start_epoch = 1
+        if self.resume_path:
+            path = self.resume_path + os.sep + 'epoch.pickle'
+            with open(path, 'rb') as f:
+                start_epoch = pickle.load(f) + 1
+
+        for epoch in tqdm(range(start_epoch, start_epoch + self.epoch)):
             start_epoch_time = timeit.default_timer()
             self.do_epoch(epoch)
+            self.save_stats()
+            self.save_models(epoch=epoch)
             self._print_debug(f'Epoch {epoch} ended in {timeit.default_timer() - start_epoch_time:.2f} sec\n',
                               verbose=1)
 
@@ -196,15 +290,25 @@ class MasterNode:
                 for node_name, node in self.network.items():
                     self.update_params(node, epoch, global_iter)
 
+        # Save stat each epoch
+        for node_name, node in self.network.items():
+            for func_name, func in self.stat_funcs.items():
+                value = func(master_node=self, node=node, epoch=epoch,
+                             use_cuda=self.use_cuda)
+                self.statistics[func_name][node_name]['values'].append(value)
+                self.statistics[func_name][node_name]['epoch'].append(epoch)
+                if func_name != 'param_dev':
+                    self._print_debug(f"Node {node_name}: epoch {epoch},"
+                                      f" {func_name}= {value:.2f}", verbose=2)
+
+        # Calculate parameter deviation
+        if 'param_dev' in self.stat_funcs:
+            average_params = sum([self.statistics['param_dev'][node_name]['values'][-1]
+                                  for node_name in self.network]) / len(self.network)
             for node_name, node in self.network.items():
-                # Save stat each stat_step step
-                if global_iter % self.stat_step == 0:
-                    for func_name, func in self.stat_funcs.items():
-                        value = func(master_node=self, node=node, epoch=epoch, iter=global_iter,
-                                     use_cuda=self.use_cuda)
-                        self.statistics[func_name][node_name]['values'].append(value)
-                        self.statistics[func_name][node_name]['iters'].append(global_iter)
-                        self._print_debug(f"Node {node_name}: epoch {epoch}, iter {global_iter},"
-                                          f" {func_name}= {value:.2f}", verbose=2)
+                value = np.linalg.norm(self.statistics['param_dev'][node_name]['values'][-1] - average_params)
+                self.statistics['param_dev'][node_name]['values'][-1] = value
+                self._print_debug(f"Node {node_name}: epoch {epoch},"
+                                  f" param_dev= {value:.2f}", verbose=2)
 
         return self

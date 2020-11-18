@@ -1,19 +1,16 @@
-import seaborn as sns
-import matplotlib.pyplot as plt
 from wide_resnet_submodule.networks import *
 import torch
 import torch.backends.cudnn as cudnn
 
 
 class ConsensusNode:
-    # TODO: сохранение модели в память
     def __init__(self,
                  name: str,
                  weights: dict,
                  train_loader,
                  lr=0.02,
                  use_cuda=False,
-                 verbose=0):
+                 verbose=1):
         """
         Class implementing consensus node in consensus network.
         :param name: unique node name in consensus network
@@ -54,22 +51,30 @@ class ConsensusNode:
             print(msg, file=self.debug_file)
         return self
 
-    def set_model(self, model, *args, **kwargs):
+    def set_model(self, model,  *args, resume_path=None, **kwargs):
         """
         Sets self.model on given model
         :param model: some model with interface like models in pytorch
+        :param resume_path: path to saved model
         :param args: other unnamed params
         :param kwargs: other named params
         :return: self
         """
-        self.model = model(*args, *kwargs)
+        # load model from resume path if exists
+        if resume_path:
+            checkpoint = torch.load(resume_path)
+            self.model = checkpoint['model']
+            self._print_debug(f'Node {self.name} successfully loads the model {self.model} from {resume_path}.',
+                              verbose=3)
+        else:
+            self.model = model(*args, *kwargs)
+            self._print_debug(f"Node {self.name} set model= {self.model} with args= {args},"
+                              f" kwargs= {kwargs}, use CUDA= {self.use_cuda}", 3)
         if self.use_cuda:
             self.model.cuda()
             self.model = torch.nn.DataParallel(self.model, device_ids=range(torch.cuda.device_count()))
             cudnn.benchmark = True
 
-        self._print_debug(f"Node {self.name} set model= {self.model} with args= {args},"
-                          f" kwargs= {kwargs}, use CUDA= {self.use_cuda}", 3)
         return self
 
     def set_optimizer(self, optimizer, *args, **kwargs):
@@ -113,21 +118,6 @@ class ConsensusNode:
         :return: model parameters
         """
         return self.model.parameters()
-
-    def show_graphs(self):
-        """
-        Shows accuracy and train loss
-        :return: nothing
-        """
-        fig, axs = plt.subplots(figsize=(20, 8), ncols=2)
-        fig.suptitle(f'{self.name}', fontsize=24)
-        fig.tight_layout(pad=4.0)
-        sns.lineplot(x=self.accuracy_list[1], y=self.accuracy_list[0], ax=axs[0])
-        axs[0].set_xlabel('Iteration', fontsize=16)
-        axs[0].set_ylabel('Accuracy', fontsize=16)
-        sns.lineplot(x=self.loss_list[1], y=self.loss_list[0], ax=axs[1])
-        axs[1].set_xlabel('Iteration', fontsize=16)
-        axs[1].set_ylabel('Loss', fontsize=16)
 
     def ask_params(self):
         """
