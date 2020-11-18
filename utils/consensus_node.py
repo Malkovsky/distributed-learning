@@ -66,16 +66,15 @@ class ConsensusNode:
             self.model = checkpoint['model']
             self._print_debug(f'Node {self.name} successfully loads the model {self.model} from {resume_path}.',
                               verbose=3)
-            return self
-
-        self.model = model(*args, *kwargs)
+        else:
+            self.model = model(*args, *kwargs)
+            self._print_debug(f"Node {self.name} set model= {self.model} with args= {args},"
+                              f" kwargs= {kwargs}, use CUDA= {self.use_cuda}", 3)
         if self.use_cuda:
             self.model.cuda()
             self.model = torch.nn.DataParallel(self.model, device_ids=range(torch.cuda.device_count()))
             cudnn.benchmark = True
 
-        self._print_debug(f"Node {self.name} set model= {self.model} with args= {args},"
-                          f" kwargs= {kwargs}, use CUDA= {self.use_cuda}", 3)
         return self
 
     def set_optimizer(self, optimizer, *args, **kwargs):
