@@ -1,12 +1,13 @@
 from utils.consensus_node import ConsensusNode
 import sys
-import timeit
+import time
 from itertools import cycle
 from tqdm.notebook import tqdm
 import torch
 import os
 import numpy as np
 import pickle5 as pickle
+import wide_resnet_submodule.config as cf
 
 
 class MasterNode:
@@ -270,7 +271,7 @@ class MasterNode:
         :return: self
         """
         self._print_debug(f'Master started\n', verbose=0)
-        start_time = timeit.default_timer()
+        start_time = time.time()
         start_epoch = 1
         if self.resume_path:
             path = self.resume_path + os.sep + 'epoch.pickle'
@@ -278,14 +279,15 @@ class MasterNode:
                 start_epoch = pickle.load(f) + 1
 
         for epoch in tqdm(range(start_epoch, start_epoch + self.epoch)):
-            start_epoch_time = timeit.default_timer()
+            start_epoch_time = time.time()
             self.do_epoch(epoch)
             self.save_stats()
             self.save_models(epoch=epoch)
-            self._print_debug(f'Epoch {epoch} ended in {timeit.default_timer() - start_epoch_time:.2f} sec\n',
+            epoch_time = time.time() - start_epoch_time
+            self._print_debug(f'Epoch {epoch} ended in: %d:%02d:%02d\n' % (cf.get_hms(epoch_time)),
                               verbose=1)
-
-        self._print_debug(f'Master ended in {timeit.default_timer() - start_time:.2f} sec\n', verbose=0)
+        elapsed_time = time.time() - start_time
+        self._print_debug('Master ended in : %d:%02d:%02d\n' % (cf.get_hms(elapsed_time)), verbose=0)
         return self
 
     def do_epoch(self, epoch):
