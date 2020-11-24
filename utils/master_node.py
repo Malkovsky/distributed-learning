@@ -18,6 +18,7 @@ class MasterNode:
                  fit_step,
                  update_params,
                  lr=0.02,
+                 w_schedule=None,
                  epoch=200,
                  epoch_len=391,
                  update_params_epoch_start=0,
@@ -36,6 +37,7 @@ class MasterNode:
         :param fit_step: function witch train node.model on one part of data which take from node.train_loader.
         :param update_params: function witch update node.model.parameters using node.weights based on node.neighbors.
         :param lr: gradient learning rate
+        :param w_schedule: schedule of weights update. None/decrease/increase
         :param epoch: number of epoch
         :param epoch_len: number of batches in each epoch
         :param update_params_epoch_start: the first epoch from which consensus begins
@@ -58,6 +60,7 @@ class MasterNode:
         self.error_kwargs = None
 
         self.lr = lr
+        self.w_schedule = w_schedule
 
         self.fit_step = fit_step
         self.update_params = update_params
@@ -288,7 +291,7 @@ class MasterNode:
                     node.ask_params()
 
                 for node_name, node in self.network.items():
-                    self.update_params(node, epoch, global_iter)
+                    self.update_params(node, epoch, global_iter, w_schedule=self.w_schedule)
 
         # Save stat each epoch
         for node_name, node in self.network.items():

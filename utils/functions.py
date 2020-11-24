@@ -3,6 +3,7 @@ from torch.autograd import Variable
 import wide_resnet_submodule.config as cf
 import numpy as np
 from itertools import chain
+from utils.config import weights_schedule
 
 
 def fit_batch_cifar(master_node, node, epoch: int, *args, use_cuda=False, **kwargs):
@@ -89,21 +90,28 @@ def calc_accuracy_cifar(master_node, node, *args, use_cuda=False, **kwargs):
     return float(accuracy)
 
 
-def update_params_cifar(node, epoch: int, *args, **kwargs):
+def update_params_cifar(node, epoch: int, *args, w_schedule=None, **kwargs):
     """
     Update node.model.parameters using node.weights based on node.neighbors.
+    :param w_schedule: schedule of weights update. None/decrease/increase
     :param node: node of ConsensusNode
     :param epoch: epoch number
     :param args: other unnamed params
     :param kwargs: other named params
     :return: nothing
     """
+    weights = weights_schedule(node.weights, node.name, epoch, w_schedule)
+
     for p in node.model.parameters():
-        p.data *= node.weights[node.name]
+        p.data *= weights[node.name]
 
     for node_name, params in node.parameters.items():
         for p, pn in zip(node.model.parameters(), params):
-            p.data += pn.data * node.weights[node_name]
+            p.data += pn.data * weights[node_name]
+
+
+def get_self_weight(master_node, node, epoch, *args, **kwargs):
+    return weights_schedule(node.weights, node.name, epoch, schedule=master_node.w_schedule)[node.name]
 
 
 def get_flat_params_cifar(master_node, node, *args, use_cuda=False, **kwargs):
