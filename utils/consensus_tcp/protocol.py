@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List, Tuple, Any
+from typing import List, Tuple, Any, Dict
 
 '''
 Master-Agent communication:
@@ -9,7 +9,7 @@ Registration:
 Post-registration (all agents registered):
     Agent  <--NeighborhoodData-- Master
     Agent  -------OK-----------> Master
-    Agent  <-----Epsilon-------- Master
+    Agent  <---NeighborWeights-- Master
     Agent  -------OK-----------> Master
 TODO
     
@@ -49,8 +49,9 @@ class ProtoNeighborhoodData:
 
 
 @dataclass
-class ProtoConsensusEpsilon:
-    epsilon: float
+class ProtoNeighborWeights:
+    weights: Dict[str, float]
+    convergence_rate: float
 
 
 @dataclass

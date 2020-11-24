@@ -11,12 +11,13 @@ from .psocket_selector import PSocketSelector
 class ConsensusAgent:
     MASTER_TOKEN = 'MASTER'
 
-    def __init__(self, token, host, port, master_host, master_port, convergence_eps=1e-4, debug=False):
+    def __init__(self, token, host, port, master_host, master_port, convergence_eps=1e-4, public_host_port=None, debug=False):
         self.token = token
         self.host = host
         self.port = port
         self.master_host = master_host
         self.master_port = master_port
+        self.public_host_port = (host, port) if public_host_port is None else public_host_port
 
         self.neighbor_count = None
         self.neighbor_psockets_incoming: Dict[Any, PickledSocketWrapper] = dict()
@@ -26,7 +27,8 @@ class ConsensusAgent:
         self.master_psocket = None
 
         self.network_ready = False
-        self.consensus_eps = None
+        self.neighbor_weights = None
+        self.convergence_rate = None
         self.convergence_eps = convergence_eps
         self.current_round = None
         self.value_history = {}
@@ -110,7 +112,7 @@ class ConsensusAgent:
         self._debug('Performing handshake with master')
         reader, writer = await asyncio.open_connection(self.master_host, self.master_port)
         self.master_psocket = PickledSocketWrapper(reader, writer)
-        await self.master_psocket.send(ProtoRegister(self.token, self.host, self.port))
+        await self.master_psocket.send(ProtoRegister(self.token, self.public_host_port[0], self.public_host_port[1]))
         ok = await self.master_psocket.recv()
         remote_name = self.master_psocket.writer.get_extra_info("peername")
         if not isinstance(ok, ProtoOk):
@@ -126,12 +128,13 @@ class ConsensusAgent:
         await self.master_psocket.send(ProtoOk())
         self.neighbor_count = len(neighborhood_data.neighbors)
         self._debug('Got neighborhood data. Waiting for consensus epsilon...')
-        epsilon_data = await self.master_psocket.recv()
-        if not isinstance(epsilon_data, ProtoConsensusEpsilon):
-            msg = f'From master({remote_name}). Expected consensus epsilon data, got: {epsilon_data!r}'
+        neighbor_weights_data = await self.master_psocket.recv()
+        if not isinstance(neighbor_weights_data, ProtoNeighborWeights):
+            msg = f'From master({remote_name}). Expected neighbor weights data, got: {neighbor_weights_data!r}'
             self._debug(msg)
             raise ProtoErrorException(msg)
-        self.consensus_eps = epsilon_data.epsilon
+        self.neighbor_weights = neighbor_weights_data.weights
+        self.convergence_rate = neighbor_weights_data.convergence_rate
         await self.master_psocket.send(ProtoOk())
         self._debug('Got consensus epsilon!')
 
@@ -229,8 +232,8 @@ class ConsensusAgent:
             if done_flag: break
 
             # we've got all the values from neighbors, now we can update our value
-            y = y * (1 - self.consensus_eps * self.neighbor_count) + self.consensus_eps * np.sum(
-                list(neighbor_values.values()), axis=0)
+            sum_neighbor_weights = np.sum([w for w in self.neighbor_weights.values()])
+            y = (1 - sum_neighbor_weights) * y + np.sum([w * neighbor_values[n] for (n, w) in self.neighbor_weights.items()], axis=0)
             c = np.all([(y - v) <= self.convergence_eps for v in neighbor_values.values()])
 
             self._debug(f'finished iteration #{current_round_iteration}')
