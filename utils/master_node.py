@@ -217,6 +217,25 @@ class MasterNode:
             torch.save(state, path + node_name + '.t7')
         return self
 
+    def equalize_all_model_params(self, node_name=None):
+        if not self.network:
+            self._print_debug(f"Error! Network does not exist!", verbose=0)
+            exit(-1)
+        if not node_name:
+            node_name = self.network.keys()[0]
+        if node_name not in self.network:
+            self._print_debug(f"Error! {node_name} does not exist!", verbose=0)
+            exit(-1)
+        model = self.network[node_name].model
+        if not model:
+            self._print_debug(f"Error! {node_name} has no model!", verbose=0)
+            exit(-1)
+        for name, node in self.network.items():
+            if name != node_name:
+                for p, pp in zip(node.model.parameters(), model.parameters()):
+                    p.data = 1 * pp.data
+        return self
+
     def initialize_nodes(self):
         """
         Initialize consensus nodes based on available information
