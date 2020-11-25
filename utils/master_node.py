@@ -38,7 +38,7 @@ class MasterNode:
         :param fit_step: function witch train node.model on one part of data which take from node.train_loader.
         :param update_params: function witch update node.model.parameters using node.weights based on node.neighbors.
         :param lr: gradient learning rate
-        :param w_schedule: schedule of weights update. None/decrease/increase
+        :param w_schedule: function for schedule of weights update
         :param epoch: number of epoch
         :param epoch_len: number of batches in each epoch
         :param update_params_epoch_start: the first epoch from which consensus begins
@@ -218,23 +218,22 @@ class MasterNode:
             torch.save(state, path + node_name + '.t7')
         return self
 
-    def equalize_all_model_params(self, node_name=None):
+    def equalize_all_model_params(self, node=None):
         if not self.network:
             self._print_debug(f"Error! Network does not exist!", verbose=0)
             exit(-1)
-        if not node_name:
-            node_name = self.network.keys()[0]
-        if node_name not in self.network:
-            self._print_debug(f"Error! {node_name} does not exist!", verbose=0)
-            exit(-1)
-        model = self.network[node_name].model
+
+        if not node:
+            node = list(self.network.values())[0]
+
+        model = node.model
         if not model:
-            self._print_debug(f"Error! {node_name} has no model!", verbose=0)
+            self._print_debug(f"Error! {node.name} has no model!", verbose=0)
             exit(-1)
+
         for name, node in self.network.items():
-            if name != node_name:
-                for p, pp in zip(node.model.parameters(), model.parameters()):
-                    p.data = 1 * pp.data
+            for p, pp in zip(node.model.parameters(), model.parameters()):
+                p.data = 1 * pp.data
         return self
 
     def initialize_nodes(self):
@@ -277,8 +276,8 @@ class MasterNode:
             path = self.resume_path + os.sep + 'epoch.pickle'
             with open(path, 'rb') as f:
                 start_epoch = pickle.load(f) + 1
-
-        for epoch in tqdm(range(start_epoch, start_epoch + self.epoch)):
+        self.epoch += start_epoch - 1
+        for epoch in tqdm(range(start_epoch, self.epoch + 1)):
             start_epoch_time = time.time()
             self.do_epoch(epoch)
             self.save_stats()
@@ -312,7 +311,7 @@ class MasterNode:
                     node.ask_params()
 
                 for node_name, node in self.network.items():
-                    self.update_params(node, epoch, global_iter, w_schedule=self.w_schedule)
+                    self.update_params(self, node, epoch)
 
         # Save stat each epoch
         for node_name, node in self.network.items():
