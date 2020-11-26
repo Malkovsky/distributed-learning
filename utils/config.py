@@ -3,6 +3,9 @@ import math
 
 
 def weights_schedule_dummy_increase(weights, self_name, epoch, num_epoch):
+    if len(weights) == 1:
+        return weights
+
     change_part = 1. - weights[self_name]
     coef = 0
 
@@ -23,6 +26,9 @@ def weights_schedule_dummy_increase(weights, self_name, epoch, num_epoch):
 
 
 def weights_schedule_dummy_decrease(weights, self_name, epoch, num_epoch):
+    if len(weights) == 1:
+        return weights
+
     change_part = 1. - weights[self_name]
 
     if epoch > 80:
@@ -44,6 +50,9 @@ def weights_schedule_dummy_decrease(weights, self_name, epoch, num_epoch):
 
 
 def weights_schedule_log_decrease(weights, self_name, epoch, num_epoch):
+    if len(weights) == 1:
+        return weights
+
     change_part = 1. - weights[self_name]
     x = 1. + weights[self_name] + math.log(epoch, 1./(num_epoch / 2.))
     x = min(x, 1.)
@@ -61,6 +70,9 @@ def weights_schedule_log_decrease(weights, self_name, epoch, num_epoch):
 
 
 def weights_schedule_log_increase(weights, self_name, epoch, num_epoch):
+    if len(weights) == 1:
+        return weights
+
     change_part = 1. - weights[self_name]
 
     x = weights[self_name] - math.log(epoch, 1./(num_epoch*50.))
