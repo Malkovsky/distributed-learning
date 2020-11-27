@@ -2,7 +2,7 @@
 import math
 
 
-def weights_schedule_dummy_increase(weights, self_name, epoch, num_epoch):
+def weights_schedule_dummy_increase(weights, self_name, epoch, num_epoch, *args, **kwargs):
     if len(weights) == 1:
         return weights
 
@@ -25,7 +25,7 @@ def weights_schedule_dummy_increase(weights, self_name, epoch, num_epoch):
     return new_weights
 
 
-def weights_schedule_dummy_decrease(weights, self_name, epoch, num_epoch):
+def weights_schedule_dummy_decrease(weights, self_name, epoch, num_epoch, *args, **kwargs):
     if len(weights) == 1:
         return weights
 
@@ -49,7 +49,7 @@ def weights_schedule_dummy_decrease(weights, self_name, epoch, num_epoch):
     return new_weights
 
 
-def weights_schedule_log_decrease(weights, self_name, epoch, num_epoch):
+def weights_schedule_log_decrease(weights, self_name, epoch, num_epoch, *args, **kwargs):
     if len(weights) == 1:
         return weights
 
@@ -69,7 +69,7 @@ def weights_schedule_log_decrease(weights, self_name, epoch, num_epoch):
     return new_weights
 
 
-def weights_schedule_log_increase(weights, self_name, epoch, num_epoch):
+def weights_schedule_log_increase(weights, self_name, epoch, num_epoch, *args, **kwargs):
     if len(weights) == 1:
         return weights
 
@@ -90,12 +90,12 @@ def weights_schedule_log_increase(weights, self_name, epoch, num_epoch):
     return new_weights
 
 
-def weights_schedule_linear_decrease(w, epoch, num_epoch):
+def weights_schedule_linear_decrease(w, epoch, num_epoch, *args, **kwargs):
     k = 1 / (1.2*num_epoch)
     return max(w, 1 - epoch*k)
 
 
-def weights_schedule_linear_increase(w, epoch, num_epoch):
+def weights_schedule_linear_increase(w, epoch, num_epoch, *args, **kwargs):
     k = 1 / (1.2*num_epoch)
     res = epoch*k
     res = min(1., res)
