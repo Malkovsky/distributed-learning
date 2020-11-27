@@ -90,17 +90,45 @@ def weights_schedule_log_increase(weights, self_name, epoch, num_epoch, *args, *
     return new_weights
 
 
-def weights_schedule_linear_decrease(w, epoch, num_epoch, *args, **kwargs):
+def weights_schedule_linear_decrease(weights, self_name, epoch, num_epoch, *args, **kwargs):
+    if len(weights) == 1:
+        return weights
+
+    change_part = 1. - weights[self_name]
+
     k = 1 / (1.2*num_epoch)
-    return max(w, 1 - epoch*k)
+    x = max(weights[self_name], 1 - epoch*k)
+
+    coef = abs(x - weights[self_name]) / change_part
+
+    new_weights = {name: (w + change_part * coef
+                          if name == self_name
+                          else w * (1. - coef)
+                          )
+                   for name, w in weights.items()
+                   }
+    return new_weights
 
 
-def weights_schedule_linear_increase(w, epoch, num_epoch, *args, **kwargs):
+def weights_schedule_linear_increase(weights, self_name, epoch, num_epoch, *args, **kwargs):
+    if len(weights) == 1:
+        return weights
+
+    change_part = 1. - weights[self_name]
+
     k = 1 / (1.2*num_epoch)
-    res = epoch*k
-    res = min(1., res)
-    res = max(w, res)
-    return res
+    x = min(1., epoch*k)
+    x = max(weights[self_name], x)
+
+    coef = abs(x - weights[self_name]) / change_part
+
+    new_weights = {name: (w + change_part * coef
+                          if name == self_name
+                          else w * (1. - coef)
+                          )
+                   for name, w in weights.items()
+                   }
+    return new_weights
 
 
 def lr_schedule_default(lr, epoch, *args, **kwargs):
@@ -134,53 +162,61 @@ if __name__ == '__main__':
     """weights = {'Alice': {'Alice': 0.34, 'Bob': 0.33, 'Charlie': 0.33},
                'Bob': {'Alice': 0.33, 'Bob': 0.34, 'Charlie': 0.33},
                'Charlie': {'Alice': 0.33, 'Bob': 0.33, 'Charlie': 0.34}}"""
-    print('Decrease type:')
-    new_w = weights_schedule_log_decrease(weights['Alice'], 'Alice', epoch=1, num_epoch=200)
+    schedule = weights_schedule_linear_decrease
+
+    new_w = schedule(weights['Alice'], 'Alice', epoch=1, num_epoch=200)
     print(new_w, sum(new_w.values()))
 
-    new_w = weights_schedule_log_decrease(weights['Alice'], 'Alice', epoch=41, num_epoch=200)
+    new_w = schedule(weights['Alice'], 'Alice', epoch=41, num_epoch=200)
     print(new_w, sum(new_w.values()))
 
-    new_w = weights_schedule_log_decrease(weights['Alice'], 'Alice', epoch=61, num_epoch=200)
+    new_w = schedule(weights['Alice'], 'Alice', epoch=61, num_epoch=200)
     print(new_w, sum(new_w.values()))
 
-    new_w = weights_schedule_log_decrease(weights['Alice'], 'Alice', epoch=81, num_epoch=200)
+    new_w = schedule(weights['Alice'], 'Alice', epoch=81, num_epoch=200)
     print(new_w, sum(new_w.values()))
 
-    new_w = weights_schedule_log_decrease(weights['Alice'], 'Alice', epoch=1, num_epoch=100)
+    new_w = schedule(weights['Alice'], 'Alice', epoch=1, num_epoch=100)
     print(new_w, sum(new_w.values()))
 
-    new_w = weights_schedule_log_decrease(weights['Alice'], 'Alice', epoch=41, num_epoch=100)
+    new_w = schedule(weights['Alice'], 'Alice', epoch=41, num_epoch=100)
     print(new_w, sum(new_w.values()))
 
-    new_w = weights_schedule_log_decrease(weights['Alice'], 'Alice', epoch=61, num_epoch=100)
+    new_w = schedule(weights['Alice'], 'Alice', epoch=61, num_epoch=100)
     print(new_w, sum(new_w.values()))
 
-    new_w = weights_schedule_log_decrease(weights['Alice'], 'Alice', epoch=81, num_epoch=100)
+    new_w = schedule(weights['Alice'], 'Alice', epoch=81, num_epoch=100)
     print(new_w, sum(new_w.values()))
 
+    schedule = weights_schedule_linear_increase
     print('Increase type:')
 
-    new_w = weights_schedule_log_increase(weights['Alice'], 'Alice', epoch=1, num_epoch=200)
+    new_w = schedule(weights['Alice'], 'Alice', epoch=1, num_epoch=200)
     print(new_w, sum(new_w.values()))
 
-    new_w = weights_schedule_log_increase(weights['Alice'], 'Alice', epoch=41, num_epoch=200)
+    new_w = schedule(weights['Alice'], 'Alice', epoch=41, num_epoch=200)
     print(new_w, sum(new_w.values()))
 
-    new_w = weights_schedule_log_increase(weights['Alice'], 'Alice', epoch=61, num_epoch=200)
+    new_w = schedule(weights['Alice'], 'Alice', epoch=61, num_epoch=200)
     print(new_w, sum(new_w.values()))
 
-    new_w = weights_schedule_log_increase(weights['Alice'], 'Alice', epoch=81, num_epoch=200)
+    new_w = schedule(weights['Alice'], 'Alice', epoch=81, num_epoch=200)
     print(new_w, sum(new_w.values()))
 
-    new_w = weights_schedule_log_increase(weights['Alice'], 'Alice', epoch=1, num_epoch=100)
+    new_w = schedule(weights['Alice'], 'Alice', epoch=151, num_epoch=200)
     print(new_w, sum(new_w.values()))
 
-    new_w = weights_schedule_log_increase(weights['Alice'], 'Alice', epoch=41, num_epoch=100)
+    new_w = schedule(weights['Alice'], 'Alice', epoch=181, num_epoch=200)
     print(new_w, sum(new_w.values()))
 
-    new_w = weights_schedule_log_increase(weights['Alice'], 'Alice', epoch=61, num_epoch=100)
+    new_w = schedule(weights['Alice'], 'Alice', epoch=1, num_epoch=100)
     print(new_w, sum(new_w.values()))
 
-    new_w = weights_schedule_log_increase(weights['Alice'], 'Alice', epoch=81, num_epoch=100)
+    new_w = schedule(weights['Alice'], 'Alice', epoch=41, num_epoch=100)
+    print(new_w, sum(new_w.values()))
+
+    new_w = schedule(weights['Alice'], 'Alice', epoch=61, num_epoch=100)
+    print(new_w, sum(new_w.values()))
+
+    new_w = schedule(weights['Alice'], 'Alice', epoch=81, num_epoch=100)
     print(new_w, sum(new_w.values()))
