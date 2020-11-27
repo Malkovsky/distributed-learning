@@ -23,7 +23,7 @@ def fit_batch_cifar(master_node, node, epoch: int, *args, use_cuda=False, **kwar
     node.model.train()
     node.model.training = True
     optimizer = node.optimizer(node.model.parameters(),
-                               lr=master_node.lr_schedule(node.lr, epoch),
+                               lr=master_node.lr_schedule(node.lr, epoch, master_node.epoch),
                                **node.opt_kwargs)
     train = Variable(images)
     labels = Variable(labels)
