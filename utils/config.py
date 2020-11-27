@@ -90,6 +90,42 @@ def weights_schedule_log_increase(weights, self_name, epoch, num_epoch):
     return new_weights
 
 
+def weights_schedule_linear_decrease(w, epoch, num_epoch):
+    k = 1 / (1.2*num_epoch)
+    return max(w, 1 - epoch*k)
+
+
+def weights_schedule_linear_increase(w, epoch, num_epoch):
+    k = 1 / (1.2*num_epoch)
+    res = epoch*k
+    res = min(1., res)
+    res = max(w, res)
+    return res
+
+
+def lr_schedule_default(lr, epoch, *args, **kwargs):
+    optim_factor = 0
+    if(epoch > 160):
+        optim_factor = 3
+    elif(epoch > 120):
+        optim_factor = 2
+    elif(epoch > 60):
+        optim_factor = 1
+
+    return lr * math.pow(0.2, optim_factor)
+
+
+def lr_schedule_smooth(lr, epoch, smooth_factor=50, *args, **kwargs):
+    p = -1 + epoch / smooth_factor
+    res = lr * pow(0.2, p)
+    res = min(res, lr)
+    return res
+
+
+def lr_const(*args, const=0.02, **kwargs):
+    return const
+
+
 if __name__ == '__main__':
     weights = {'Alice': {'Alice': 0.5, 'Bob': 0.25, 'Charlie': 0.25},
                'Bob': {'Alice': 0.25, 'Bob': 0.5, 'Charlie': 0.25},

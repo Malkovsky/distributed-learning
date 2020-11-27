@@ -23,7 +23,7 @@ def fit_batch_cifar(master_node, node, epoch: int, *args, use_cuda=False, **kwar
     node.model.train()
     node.model.training = True
     optimizer = node.optimizer(node.model.parameters(),
-                               lr=cf.learning_rate(node.lr, epoch),
+                               lr=master_node.lr_schedule(node.lr, epoch),
                                **node.opt_kwargs)
     train = Variable(images)
     labels = Variable(labels)
@@ -117,6 +117,10 @@ def get_self_weight(master_node, node, epoch, *args, **kwargs):
         return master_node.w_schedule(node.weights, node.name, epoch, master_node.epoch)[node.name]
     else:
         return node.weights[node.name]
+
+
+def get_lr(master_node, node, epoch, *args, **kwargs):
+    return master_node.lr_schedule(node.lr, epoch)
 
 
 def get_flat_params_cifar(master_node, node, *args, use_cuda=False, **kwargs):

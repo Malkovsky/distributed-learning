@@ -8,6 +8,7 @@ import os
 import numpy as np
 import pickle5 as pickle
 import wide_resnet_submodule.config as cf
+from utils.config import lr_schedule_default
 
 
 class MasterNode:
@@ -20,6 +21,7 @@ class MasterNode:
                  update_params,
                  lr=0.02,
                  w_schedule=None,
+                 lr_schedule=lr_schedule_default,
                  epoch=200,
                  epoch_len=391,
                  update_params_epoch_start=0,
@@ -39,6 +41,7 @@ class MasterNode:
         :param update_params: function witch update node.model.parameters using node.weights based on node.neighbors.
         :param lr: gradient learning rate
         :param w_schedule: function for schedule of weights update
+        :param w_schedule: function for schedule of learning rate update
         :param epoch: number of epoch
         :param epoch_len: number of batches in each epoch
         :param update_params_epoch_start: the first epoch from which consensus begins
@@ -62,6 +65,7 @@ class MasterNode:
 
         self.lr = lr
         self.w_schedule = w_schedule
+        self.lr_schedule = lr_schedule
 
         self.fit_step = fit_step
         self.update_params = update_params
