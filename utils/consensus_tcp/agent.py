@@ -180,7 +180,7 @@ class ConsensusAgent:
         converged_flag_set = False
         done_flag = False
         shutdown_flag = False
-        y = value * weight / mean_weight
+        y = value * (weight / mean_weight)
         self._debug(f'Adding value to history with key {(self.current_round, current_round_iteration)}')
         self.value_history[(self.current_round, current_round_iteration)] = y.copy()
         self.value_history_request_counts[(self.current_round, current_round_iteration)] = 0
