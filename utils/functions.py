@@ -23,7 +23,7 @@ def fit_batch_cifar(master_node, node, epoch: int, *args, use_cuda=False, **kwar
     node.model.train()
     node.model.training = True
     optimizer = node.optimizer(node.model.parameters(),
-                               lr=cf.learning_rate(node.lr, epoch),
+                               lr=master_node.lr_schedule(node.lr, epoch, master_node.epoch),
                                **node.opt_kwargs)
     train = Variable(images)
     labels = Variable(labels)
@@ -89,21 +89,38 @@ def calc_accuracy_cifar(master_node, node, *args, use_cuda=False, **kwargs):
     return float(accuracy)
 
 
-def update_params_cifar(node, epoch: int, *args, **kwargs):
+def update_params_cifar(master_node, node, epoch: int, *args, **kwargs):
     """
     Update node.model.parameters using node.weights based on node.neighbors.
+    :param master_node: node of MasterNode
     :param node: node of ConsensusNode
     :param epoch: epoch number
     :param args: other unnamed params
     :param kwargs: other named params
     :return: nothing
     """
+    if master_node.w_schedule:
+        weights = master_node.w_schedule(node.weights, node.name, epoch, master_node.epoch)
+    else:
+        weights = node.weights
+
     for p in node.model.parameters():
-        p.data *= node.weights[node.name]
+        p.data *= weights[node.name]
 
     for node_name, params in node.parameters.items():
         for p, pn in zip(node.model.parameters(), params):
-            p.data += pn.data * node.weights[node_name]
+            p.data += pn.data * weights[node_name]
+
+
+def get_self_weight(master_node, node, epoch, *args, **kwargs):
+    if master_node.w_schedule:
+        return master_node.w_schedule(node.weights, node.name, epoch, master_node.epoch)[node.name]
+    else:
+        return node.weights[node.name]
+
+
+def get_lr(master_node, node, epoch, *args, **kwargs):
+    return master_node.lr_schedule(node.lr, epoch)
 
 
 def get_flat_params_cifar(master_node, node, *args, use_cuda=False, **kwargs):

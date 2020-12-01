@@ -1,12 +1,14 @@
 from utils.consensus_node import ConsensusNode
 import sys
-import timeit
+import time
 from itertools import cycle
 from tqdm.notebook import tqdm
 import torch
 import os
 import numpy as np
 import pickle5 as pickle
+import wide_resnet_submodule.config as cf
+from utils.config import lr_schedule_default
 
 
 class MasterNode:
@@ -18,6 +20,8 @@ class MasterNode:
                  fit_step,
                  update_params,
                  lr=0.02,
+                 w_schedule=None,
+                 lr_schedule=lr_schedule_default,
                  epoch=200,
                  epoch_len=391,
                  update_params_epoch_start=0,
@@ -36,6 +40,8 @@ class MasterNode:
         :param fit_step: function witch train node.model on one part of data which take from node.train_loader.
         :param update_params: function witch update node.model.parameters using node.weights based on node.neighbors.
         :param lr: gradient learning rate
+        :param w_schedule: function for schedule of weights update
+        :param w_schedule: function for schedule of learning rate update
         :param epoch: number of epoch
         :param epoch_len: number of batches in each epoch
         :param update_params_epoch_start: the first epoch from which consensus begins
@@ -58,6 +64,8 @@ class MasterNode:
         self.error_kwargs = None
 
         self.lr = lr
+        self.w_schedule = w_schedule
+        self.lr_schedule = lr_schedule
 
         self.fit_step = fit_step
         self.update_params = update_params
@@ -214,6 +222,24 @@ class MasterNode:
             torch.save(state, path + node_name + '.t7')
         return self
 
+    def equalize_all_model_params(self, node=None):
+        if not self.network:
+            self._print_debug(f"Error! Network does not exist!", verbose=0)
+            exit(-1)
+
+        if not node:
+            node = list(self.network.values())[0]
+
+        model = node.model
+        if not model:
+            self._print_debug(f"Error! {node.name} has no model!", verbose=0)
+            exit(-1)
+
+        for name, node in self.network.items():
+            for p, pp in zip(node.model.parameters(), model.parameters()):
+                p.data = 1 * pp.data
+        return self
+
     def initialize_nodes(self):
         """
         Initialize consensus nodes based on available information
@@ -248,22 +274,23 @@ class MasterNode:
         :return: self
         """
         self._print_debug(f'Master started\n', verbose=0)
-        start_time = timeit.default_timer()
+        start_time = time.time()
         start_epoch = 1
         if self.resume_path:
             path = self.resume_path + os.sep + 'epoch.pickle'
             with open(path, 'rb') as f:
                 start_epoch = pickle.load(f) + 1
-
-        for epoch in tqdm(range(start_epoch, start_epoch + self.epoch)):
-            start_epoch_time = timeit.default_timer()
+        self.epoch += start_epoch - 1
+        for epoch in tqdm(range(start_epoch, self.epoch + 1)):
+            start_epoch_time = time.time()
             self.do_epoch(epoch)
             self.save_stats()
             self.save_models(epoch=epoch)
-            self._print_debug(f'Epoch {epoch} ended in {timeit.default_timer() - start_epoch_time:.2f} sec\n',
+            epoch_time = time.time() - start_epoch_time
+            self._print_debug(f'Epoch {epoch} ended in: %d:%02d:%02d\n' % (cf.get_hms(epoch_time)),
                               verbose=1)
-
-        self._print_debug(f'Master ended in {timeit.default_timer() - start_time:.2f} sec\n', verbose=0)
+        elapsed_time = time.time() - start_time
+        self._print_debug('Master ended in : %d:%02d:%02d\n' % (cf.get_hms(elapsed_time)), verbose=0)
         return self
 
     def do_epoch(self, epoch):
@@ -288,7 +315,7 @@ class MasterNode:
                     node.ask_params()
 
                 for node_name, node in self.network.items():
-                    self.update_params(node, epoch, global_iter)
+                    self.update_params(self, node, epoch)
 
         # Save stat each epoch
         for node_name, node in self.network.items():

@@ -67,7 +67,7 @@ class ConsensusNode:
             self._print_debug(f'Node {self.name} successfully loads the model {self.model} from {resume_path}.',
                               verbose=3)
         else:
-            self.model = model(*args, *kwargs)
+            self.model = model(*args, **kwargs)
             self._print_debug(f"Node {self.name} set model= {self.model} with args= {args},"
                               f" kwargs= {kwargs}, use CUDA= {self.use_cuda}", 3)
         if self.use_cuda:
