@@ -154,6 +154,18 @@ def lr_const(*args, const=0.02, **kwargs):
     return const
 
 
+def lr_schedule_div3(lr, epoch, *args, **kwargs):
+    optim_factor = 0
+    if epoch > 60:
+        optim_factor = 3
+    elif epoch > 40:
+        optim_factor = 2
+    elif epoch > 20:
+        optim_factor = 1
+
+    return lr * math.pow(0.2, optim_factor)
+
+
 if __name__ == '__main__':
     weights = {'Alice': {'Alice': 0.5, 'Bob': 0.25, 'Charlie': 0.25},
                'Bob': {'Alice': 0.25, 'Bob': 0.5, 'Charlie': 0.25},
