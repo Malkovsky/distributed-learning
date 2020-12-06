@@ -1,14 +1,12 @@
 from utils.consensus_node import ConsensusNode
 import sys
 import time
-from itertools import cycle
 from tqdm.notebook import tqdm
 import torch
 import os
 import numpy as np
 import pickle5 as pickle
 import wide_resnet_submodule.config as cf
-from utils.config import lr_schedule_default
 
 
 class MasterNode:
@@ -21,7 +19,7 @@ class MasterNode:
                  update_params,
                  lr=0.02,
                  w_schedule=None,
-                 lr_schedule=lr_schedule_default,
+                 lr_schedule=None,
                  epoch=200,
                  epoch_len=391,
                  update_params_epoch_start=0,
@@ -41,7 +39,7 @@ class MasterNode:
         :param update_params: function witch update node.model.parameters using node.weights based on node.neighbors.
         :param lr: gradient learning rate
         :param w_schedule: function for schedule of weights update
-        :param w_schedule: function for schedule of learning rate update
+        :param lr_schedule: function for schedule of learning rate update
         :param epoch: number of epoch
         :param epoch_len: number of batches in each epoch
         :param update_params_epoch_start: the first epoch from which consensus begins
@@ -57,7 +55,7 @@ class MasterNode:
         self.model_args = None
         self.model_kwargs = None
         self.optimizer = None
-        self.opt_args = None
+        self.opt_args = []
         self.opt_kwargs = None
         self.error = None
         self.error_args = None
@@ -65,7 +63,7 @@ class MasterNode:
 
         self.lr = lr
         self.w_schedule = w_schedule
-        self.lr_schedule = lr_schedule
+        self.lr_schedule = lr_schedule if lr_schedule else lambda x: 1.0
 
         self.fit_step = fit_step
         self.update_params = update_params
@@ -150,7 +148,7 @@ class MasterNode:
         Sets self stat_funcs and self statistics on stat_funcs and statistics or loads it from self.resume_path
         :param stat_funcs: dict of statistic functions
         :param statistics: dict for saving statistics for each nodes: statistics['func_name']['node_name']['values/epoch/tmp']
-        :param args: ther unnamed params
+        :param args: other unnamed params
         :param kwargs: other named params
         :return: self
         """
@@ -217,7 +215,7 @@ class MasterNode:
 
         for node_name, node in self.network.items():
             state = {
-                'model': node.model.module if self.use_cuda else node.model,
+                'model': node.model.state_dict(),
             }
             torch.save(state, path + node_name + '.t7')
         return self
@@ -248,7 +246,7 @@ class MasterNode:
         self.network = {name: ConsensusNode(name=name,
                                             lr=self.lr,
                                             weights=self.weights[name],
-                                            train_loader=cycle(iter(self.train_loaders[name])),
+                                            train_loader=iter(self.train_loaders[name]),
                                             use_cuda=self.use_cuda,
                                             verbose=self.verbose)
                         for name in self.node_names}
@@ -256,11 +254,11 @@ class MasterNode:
         for node_name, node in self.network.items():
             if self.resume_path:
                 path = self.resume_path + os.sep + node_name + '.t7'
-                node.set_model(self.model, resume_path=path)
+                node.set_model(self.model, *self.model_args, resume_path=path, **self.model_kwargs)
             elif self.model:
                 node.set_model(self.model, *self.model_args, **self.model_kwargs)
             if self.optimizer:
-                node.set_optimizer(self.optimizer, *self.opt_args, **self.opt_kwargs)
+                node.set_optimizer(self.optimizer, self.lr_schedule, *self.opt_args, **self.opt_kwargs)
             if self.error:
                 node.set_error(self.error, *self.error_args, **self.error_kwargs)
             node.set_neighbors({neighbor_name: self.network[neighbor_name]
@@ -300,6 +298,8 @@ class MasterNode:
         :return: self
         """
         self._print_debug(f"Epoch {epoch}:", verbose=1)
+        for node_name, node in self.network.items():
+            node.train_loader = iter(self.train_loaders[node_name])
         for it in range(1, self.epoch_len + 1):
             global_iter = (epoch - 1) * self.epoch_len + it
 
@@ -337,5 +337,8 @@ class MasterNode:
                 self.statistics['param_dev'][node_name]['values'][-1] = value
                 self._print_debug(f"Node {node_name}: epoch {epoch},"
                                   f" param_dev= {value:.2f}", verbose=2)
+
+        for node in self.network.values():
+            node.lr_scheduler.step()
 
         return self

@@ -22,8 +22,7 @@ class ConsensusNode:
         """
         self.model = None
         self.optimizer = None
-        self.opt_args = None
-        self.opt_kwargs = None
+        self.lr_scheduler = None
         self.error = None
 
         self.lr = lr
@@ -60,24 +59,24 @@ class ConsensusNode:
         :param kwargs: other named params
         :return: self
         """
-        # load model from resume path if exists
-        if resume_path:
-            checkpoint = torch.load(resume_path)
-            self.model = checkpoint['model']
-            self._print_debug(f'Node {self.name} successfully loads the model {self.model} from {resume_path}.',
-                              verbose=3)
-        else:
-            self.model = model(*args, **kwargs)
-            self._print_debug(f"Node {self.name} set model= {self.model} with args= {args},"
-                              f" kwargs= {kwargs}, use CUDA= {self.use_cuda}", 3)
+        self.model = model(*args, **kwargs)
+
         if self.use_cuda:
             self.model.cuda()
             self.model = torch.nn.DataParallel(self.model, device_ids=range(torch.cuda.device_count()))
-            cudnn.benchmark = True
 
+        # load model from resume path if exists
+        if resume_path:
+            checkpoint = torch.load(resume_path)
+            self.model.load_state_dict(checkpoint['model'])
+            self._print_debug(f'Node {self.name} successfully loads the model {self.model} from {resume_path}.',
+                              verbose=3)
+        else:
+            self._print_debug(f"Node {self.name} set model= {self.model} with args= {args},"
+                              f" kwargs= {kwargs}, use CUDA= {self.use_cuda}", 3)
         return self
 
-    def set_optimizer(self, optimizer, *args, **kwargs):
+    def set_optimizer(self, optimizer, lr_schedule, *args, **kwargs):
         """
         Sets self optimizer on given optimizer
         :param optimizer: some pytorch optimizer
@@ -85,10 +84,9 @@ class ConsensusNode:
         :param kwargs: other named params
         :return: self
         """
-        self.optimizer = optimizer
-        self.opt_args = args
-        self.opt_kwargs = kwargs
-        self._print_debug(f"Node {self.name} set optimizer={self.optimizer} with args={args}, kwargs={kwargs}", 3)
+        self.optimizer = optimizer(self.model.parameters(), lr=self.lr, **kwargs)
+        self.lr_scheduler = torch.optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda=lr_schedule)
+        self._print_debug(f"Node {self.name} set optimizer={self.optimizer} with kwargs={kwargs}", 3)
         return self
 
     def set_error(self, error, *args, **kwargs):

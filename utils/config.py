@@ -131,30 +131,19 @@ def weights_schedule_linear_increase(weights, self_name, epoch, num_epoch, *args
     return new_weights
 
 
-def lr_schedule_default(lr, epoch, *args, **kwargs):
+def lr_schedule_default(epoch):
     optim_factor = 0
-    if(epoch > 160):
+    if epoch > 160:
         optim_factor = 3
-    elif(epoch > 120):
+    elif epoch > 120:
         optim_factor = 2
-    elif(epoch > 60):
+    elif epoch > 60:
         optim_factor = 1
 
-    return lr * math.pow(0.2, optim_factor)
+    return math.pow(0.2, optim_factor)
 
 
-def lr_schedule_smooth(lr, epoch, smooth_factor=50, *args, **kwargs):
-    p = -1 + epoch / smooth_factor
-    res = lr * pow(0.2, p)
-    res = min(res, lr)
-    return res
-
-
-def lr_const(*args, const=0.02, **kwargs):
-    return const
-
-
-def lr_schedule_div3(lr, epoch, *args, **kwargs):
+def lr_schedule_div3(epoch):
     optim_factor = 0
     if epoch > 60:
         optim_factor = 3
@@ -163,7 +152,7 @@ def lr_schedule_div3(lr, epoch, *args, **kwargs):
     elif epoch > 20:
         optim_factor = 1
 
-    return lr * math.pow(0.2, optim_factor)
+    return math.pow(0.2, optim_factor)
 
 
 if __name__ == '__main__':

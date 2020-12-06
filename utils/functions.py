@@ -16,20 +16,15 @@ def fit_batch_cifar(master_node, node, epoch: int, *args, use_cuda=False, **kwar
     :param kwargs: other named params
     :return: nothing
     """
-    images, labels = next(node.train_loader)
+    train, labels = next(node.train_loader)
     if use_cuda:
-        images, labels = images.cuda(), labels.cuda()
+        train, labels = train.cuda(), labels.cuda()
 
     node.model.train()
     node.model.training = True
-    optimizer = node.optimizer(node.model.parameters(),
-                               lr=master_node.lr_schedule(node.lr, epoch, master_node.epoch),
-                               **node.opt_kwargs)
-    train = Variable(images)
-    labels = Variable(labels)
 
     # Clear gradients
-    optimizer.zero_grad()
+    node.optimizer.zero_grad()
 
     # Forward propagation
     outputs = node.model(train)
@@ -41,7 +36,7 @@ def fit_batch_cifar(master_node, node, epoch: int, *args, use_cuda=False, **kwar
     loss.backward()
 
     # Update parameters
-    optimizer.step()
+    node.optimizer.step()
     master_node.statistics['cumulative_train_loss'][node.name]['tmp'] += loss.item()
 
 
@@ -69,10 +64,9 @@ def calc_accuracy_cifar(master_node, node, *args, use_cuda=False, **kwargs):
 
     with torch.no_grad():
         # Predict test dataset
-        for images, labels in master_node.test_loader:
-            test, labels = Variable(images), Variable(labels)
+        for test, labels in master_node.test_loader:
             if use_cuda:
-                images, labels = images.cuda(), labels.cuda()
+                test, labels = test.cuda(), labels.cuda()
 
             # Forward propagation
             outputs = node.model(test)
