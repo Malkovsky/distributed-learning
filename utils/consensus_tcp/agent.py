@@ -304,8 +304,13 @@ class ConsensusAgent:
                     raise ProtoErrorException(msg)
             else: # it is neighbor's token
                 n_token, n_resp = token, req
+                if isinstance(n_resp, ProtoValueResponse):
+                    self._debug(
+                        f'! got request/response from "{n_token}" from previous round/iteration:'
+                        f' {(n_resp.round_id, n_resp.round_iteration)}')
+                    continue  # skip
                 if not isinstance(n_resp, ProtoRunOnceValueResponse):
-                    msg = f'From agent({n_token}). Expected value response, got: {n_resp!r}'
+                    msg = f'From agent({n_token}). Expected (run once) value response, got: {n_resp!r}'
                     self._debug(msg)
                     raise ProtoErrorException(msg)
                 self._debug(f'got (run once) value from "{n_token}"!')
