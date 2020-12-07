@@ -89,6 +89,16 @@ class ProtoValueResponse:
 
 
 @dataclass
+class ProtoRunOnceValueRequest:
+    pass
+
+
+@dataclass
+class ProtoRunOnceValueResponse:
+    value: Any
+
+
+@dataclass
 class ProtoDone:
     round_id: int
 

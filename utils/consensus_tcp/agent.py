@@ -33,6 +33,8 @@ class ConsensusAgent:
         self.current_round = None
         self.value_history = {}
         self.value_history_request_counts = {}
+        self.run_once_value = None
+        self.run_once_request_count = 0
 
         self.debug = debug
 
@@ -63,6 +65,19 @@ class ConsensusAgent:
             if token is None:
                 await asyncio.sleep(0.25)
                 continue
+            if isinstance(req, ProtoRunOnceValueRequest):
+                self._debug(f'Got (run once) value request from agent({token})')
+                while self.run_once_value is None: # wait for the value
+                    await asyncio.sleep(0.02)
+                await self.neighbor_psockets_incoming[token].send(
+                    ProtoRunOnceValueResponse(self.run_once_value)
+                )
+                self.run_once_request_count += 1
+                if self.run_once_request_count == self.neighbor_count:
+                    self.run_once_value = None
+                    self.run_once_request_count = 0
+                continue
+
             if not isinstance(req, ProtoValueRequest):
                 msg = f'From agent({token}). Expected value request, got: {req!r}'
                 self._debug(msg)
@@ -158,7 +173,7 @@ class ConsensusAgent:
         self._debug(f'We are ready for consensus now!')
         self.network_ready = True
 
-    async def run_round(self, value, weight):
+    async def run_round(self, value, weight, convergence_eps=None):
         if not self.network_ready:
             await self.do_handshake()
 
@@ -177,6 +192,8 @@ class ConsensusAgent:
         mean_weight = resp.mean_weight
         self._debug(f'Got new round notification from master! Round id: {resp.round_id}')
 
+        if convergence_eps is None:
+            convergence_eps = self.convergence_eps
         converged_flag_set = False
         done_flag = False
         shutdown_flag = False
@@ -234,7 +251,7 @@ class ConsensusAgent:
             # we've got all the values from neighbors, now we can update our value
             sum_neighbor_weights = np.sum([w for w in self.neighbor_weights.values()])
             y = (1 - sum_neighbor_weights) * y + np.sum([w * neighbor_values[n] for (n, w) in self.neighbor_weights.items()], axis=0)
-            c = np.all([(y - v) <= self.convergence_eps for v in neighbor_values.values()])
+            c = np.all([np.abs(y - v) <= convergence_eps for v in neighbor_values.values()])
 
             self._debug(f'finished iteration #{current_round_iteration}')
             current_round_iteration += 1
@@ -254,3 +271,50 @@ class ConsensusAgent:
                     converged_flag_set = False
         self._debug(f'final result: {y}')
         return y
+
+    async def run_once(self, value):
+        if not self.network_ready:
+            await self.do_handshake()
+
+        while self.run_once_value is not None:  # wait until all neighbors got our previous value
+            await asyncio.sleep(0.02)
+
+        self.run_once_value = value
+
+        for token, psocket in self.neighbor_psockets_outcoming.items():
+            self._debug(f'requesting (run once) value from agent({token})')
+            await psocket.send(ProtoRunOnceValueRequest())
+
+        neighbor_values = {}
+
+        self.neighbor_outcoming_psocket_selector.add(self.MASTER_TOKEN, self.master_psocket)
+
+        while len(neighbor_values.keys()) != self.neighbor_count:
+            # wait for values / done / shutdown
+            token, req = await self.neighbor_outcoming_psocket_selector.recv()
+            if token == self.MASTER_TOKEN:
+                data = req
+                if isinstance(data, ProtoShutdown):
+                    self._debug('Got SHUTDOWN from master')
+                    self.server.close()
+                    raise ProtoErrorException(ProtoShutdown())
+                else:
+                    msg = f'Unexpected request from master: {data!r}'
+                    self._debug(msg)
+                    raise ProtoErrorException(msg)
+            else: # it is neighbor's token
+                n_token, n_resp = token, req
+                if not isinstance(n_resp, ProtoRunOnceValueResponse):
+                    msg = f'From agent({n_token}). Expected value response, got: {n_resp!r}'
+                    self._debug(msg)
+                    raise ProtoErrorException(msg)
+                self._debug(f'got (run once) value from "{n_token}"!')
+                neighbor_values[n_token] = n_resp.value
+
+        self.neighbor_outcoming_psocket_selector.remove(self.MASTER_TOKEN)
+
+        # we've got all the values from neighbors, now we can update our value
+        sum_neighbor_weights = np.sum([w for w in self.neighbor_weights.values()])
+        value = (1 - sum_neighbor_weights) * value + np.sum([w * neighbor_values[n] for (n, w) in self.neighbor_weights.items()], axis=0)
+        self._debug(f'final result: {value}')
+        return value
