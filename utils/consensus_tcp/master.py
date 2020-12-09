@@ -1,17 +1,19 @@
 import numpy as np
 import asyncio, sys
-import functools
-import argparse
 from typing import Dict, List, Any
 
 from .pickled_socket import PickledSocketWrapper
 from .protocol import *
 from .psocket_selector import PSocketSelector
 
+from ..fast_averaging import find_optimal_weights
+
 class ConsensusMaster:
     def __init__(self, topology, host: str, port: int, debug=False):
         self.topology = topology
         self.tokens = list(set(np.array(topology).flatten()))
+        self.edge_weights = None
+        self.convergence_rate = None
 
         self.host: str = host
         self.port: int = port
@@ -65,22 +67,14 @@ class ConsensusMaster:
         L_eig.sort()
         print('Eigenvalues: {}'.format(L_eig))
         print('Algebraic connectivity: {}'.format(L_eig[1]))
-        P = np.eye(outdeg.shape[0]) - self._calc_eps() * L
-        print('Perron matrix:\n{}'.format(P))
-        P_eig = np.linalg.eigvals(P)
-        P_eig.sort()
-        print('Eigenvalues: {}'.format(P_eig))
-        print('Convergence speed: {}'.format(np.abs(P_eig[1])))
-        
-    @functools.lru_cache
-    def _calc_eps(self):
-        E = np.array([ [
-                int((u, v) in self.topology or (v, u) in self.topology)
-                for v in self.tokens
-            ] for u in self.tokens])
-        outdeg = np.sum(E, axis=1)
-        eps = 0.95 / np.max(outdeg) # eps \in (0, 1/max deg)
-        return eps
+        self._solve_fastest_convergence()
+        print('Convergence speed: {}'.format(self.convergence_rate))
+
+    def _solve_fastest_convergence(self):
+        if self.edge_weights is not None:
+            return self.edge_weights, self.convergence_rate
+        self.edge_weights, self.convergence_rate = find_optimal_weights(self.topology)
+        return self.edge_weights, self.convergence_rate
 
     async def handle_connection(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         psocket = PickledSocketWrapper(reader, writer)
@@ -119,8 +113,18 @@ class ConsensusMaster:
                 raise ProtoErrorException(msg)
             self._debug(f'Got OK from {token}')
 
-            self._debug(f'Sending epsilon to {token}')
-            await psocket.send(ProtoConsensusEpsilon(self._calc_eps()))
+            self._solve_fastest_convergence()
+            self._debug(f'Sending neighbor weights to {token}')
+            weights = {}
+            for (edge, weight) in zip(self.topology, self.edge_weights):
+                n = None
+                if edge[0] == token:
+                    n = edge[1]
+                if edge[1] == token:
+                    n = edge[0]
+                if n is not None:
+                    weights[n] = weight
+            await psocket.send(ProtoNeighborWeights(weights, self.convergence_rate))
             self._debug(f'Waiting for OK...')
             resp = await psocket.recv()
             if not isinstance(resp, ProtoOk):
