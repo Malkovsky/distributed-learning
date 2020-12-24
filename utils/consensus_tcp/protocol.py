@@ -90,11 +90,12 @@ class ProtoValueResponse:
 
 @dataclass
 class ProtoRunOnceValueRequest:
-    pass
+    iteration: int
 
 
 @dataclass
 class ProtoRunOnceValueResponse:
+    iteration: int
     value: Any
 
 

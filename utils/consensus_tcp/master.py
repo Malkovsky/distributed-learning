@@ -142,7 +142,7 @@ class ConsensusMaster:
         self.agent_converged = { token: False for token in self.tokens }
 
         while True:
-            token, req = await self.agent_psocket_selector.recv()
+            token, req = await self.agent_psocket_selector.recv(0.5)
             if token is None:
                 await asyncio.sleep(0.25)
                 continue

@@ -22,7 +22,7 @@ class PSocketSelector:
             self._tasks[token].cancel()
             del self._tasks[token]
 
-    async def recv(self):  # returns (token, actual result of recv)
+    async def recv(self, timeout=None):  # returns (token, actual result of recv)
         while True:
             if len(self.sockets) == 0:
                 return (None, None)
@@ -36,4 +36,7 @@ class PSocketSelector:
             for token in self.sockets.keys():
                 if token not in self._tasks:
                     self._tasks[token] = asyncio.create_task(self._wrap_listen_with_token(token))
-            self._done, _ = await asyncio.wait(list(self._tasks.values()), return_when=asyncio.FIRST_COMPLETED)
+            try:
+                self._done, _ = await asyncio.wait(list(self._tasks.values()), return_when=asyncio.FIRST_COMPLETED, timeout=timeout)
+            except TimeoutError:
+                return (None, None)

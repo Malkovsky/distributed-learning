@@ -35,6 +35,7 @@ class ConsensusAgent:
         self.value_history_request_counts = {}
         self.run_once_value = None
         self.run_once_request_count = 0
+        self.run_once_iteration = 0
 
         self.debug = debug
 
@@ -61,18 +62,22 @@ class ConsensusAgent:
     async def _serve(self):
         self._debug('Serving...')
         while True:
-            token, req = await self.neighbor_incoming_psocket_selector.recv()
+            token, req = await self.neighbor_incoming_psocket_selector.recv(0.5)
             if token is None:
                 await asyncio.sleep(0.25)
                 continue
             if isinstance(req, ProtoRunOnceValueRequest):
-                self._debug(f'Got (run once) value request from agent({token})')
+                if req.iteration < self.run_once_iteration:
+                    msg = f'!! got (run once) value request from agent({token}) and it is obsolete! Something is wrong!'
+                    print(msg)
+                    raise ProtoErrorException(msg)
+                self._debug(f'Got (run once) value request from agent({token}) for iteration {req.iteration}')
                 async def respond(token, req):
-                    while self.run_once_value is None:  # wait for the value
+                    while self.run_once_value is None or self.run_once_iteration != req.iteration:  # wait for the value
                         await asyncio.sleep(0.05)
-                    self._debug(f'Sending to {token} (run once) value')
+                    self._debug(f'Sending to {token} (run once) value (iteration {self.run_once_iteration})')
                     await self.neighbor_psockets_incoming[token].send(
-                        ProtoRunOnceValueResponse(self.run_once_value)
+                        ProtoRunOnceValueResponse(self.run_once_iteration, self.run_once_value)
                     )
                     self.run_once_request_count += 1
                     if self.run_once_request_count == self.neighbor_count:
@@ -285,10 +290,11 @@ class ConsensusAgent:
             await asyncio.sleep(0.02)
 
         self.run_once_value = value
+        self.run_once_iteration += 1
 
         for token, psocket in self.neighbor_psockets_outcoming.items():
             self._debug(f'requesting (run once) value from agent({token})')
-            await psocket.send(ProtoRunOnceValueRequest())
+            await psocket.send(ProtoRunOnceValueRequest(self.run_once_iteration))
 
         neighbor_values = {}
 
@@ -314,8 +320,8 @@ class ConsensusAgent:
                         f'! got response from "{n_token}" from previous round/iteration:'
                         f' {(n_resp.round_id, n_resp.round_iteration)}')
                     continue  # skip
-                if not isinstance(n_resp, ProtoRunOnceValueResponse):
-                    msg = f'From agent({n_token}). Expected (run once) value response, got: {n_resp!r}'
+                if not isinstance(n_resp, ProtoRunOnceValueResponse) or n_resp.iteration != self.run_once_iteration:
+                    msg = f'From agent({n_token}). Expected (run once) value response for iteration {self.run_once_iteration}, got: {n_resp!r}'
                     self._debug(msg)
                     raise ProtoErrorException(msg)
                 self._debug(f'got (run once) value from "{n_token}"!')
