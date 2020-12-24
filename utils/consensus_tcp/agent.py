@@ -67,15 +67,18 @@ class ConsensusAgent:
                 continue
             if isinstance(req, ProtoRunOnceValueRequest):
                 self._debug(f'Got (run once) value request from agent({token})')
-                while self.run_once_value is None: # wait for the value
-                    await asyncio.sleep(0.02)
-                await self.neighbor_psockets_incoming[token].send(
-                    ProtoRunOnceValueResponse(self.run_once_value)
-                )
-                self.run_once_request_count += 1
-                if self.run_once_request_count == self.neighbor_count:
-                    self.run_once_value = None
-                    self.run_once_request_count = 0
+                async def respond(token, req):
+                    while self.run_once_value is None:  # wait for the value
+                        await asyncio.sleep(0.05)
+                    self._debug(f'Sending to {token} (run once) value')
+                    await self.neighbor_psockets_incoming[token].send(
+                        ProtoRunOnceValueResponse(self.run_once_value)
+                    )
+                    self.run_once_request_count += 1
+                    if self.run_once_request_count == self.neighbor_count:
+                        self.run_once_value = None
+                        self.run_once_request_count = 0
+                asyncio.create_task(respond(token, req))
                 continue
 
             if not isinstance(req, ProtoValueRequest):
@@ -84,21 +87,23 @@ class ConsensusAgent:
                 raise ProtoErrorException(msg)
             key = (req.round_id, req.round_iteration)
             self._debug(f'Got value request from agent({token}) for {key}')
-            while key not in self.value_history.keys() and key[0] >= self.current_round: # wait until it is calculated
-                await asyncio.sleep(0.02)
             if key[0] < self.current_round: # obsolete request:
-                # just skip it
+                self._debug(f'Request is obsolete, skipping it')
                 continue
-            val = self.value_history[key]
-            await self.neighbor_psockets_incoming[token].send(ProtoValueResponse(req.round_id, req.round_iteration, val))
-            if not key in self.value_history_request_counts.keys():
-                self.value_history_request_counts[key] = 0
-            self.value_history_request_counts[(req.round_id, req.round_iteration)] += 1
-            if self.value_history_request_counts[key] == self.neighbor_count:
-                self._debug(f'All neighbors got our value for {key}! Deleting it')
-                del self.value_history_request_counts[key]
-                del self.value_history[key]
-
+            async def respond(token, req):
+                while key not in self.value_history.keys() and key[0] >= self.current_round: # wait until it is calculated
+                    await asyncio.sleep(0.05)
+                val = self.value_history[key]
+                self._debug(f'Sending to {token} value for {req.round_id, req.round_iteration}')
+                await self.neighbor_psockets_incoming[token].send(ProtoValueResponse(req.round_id, req.round_iteration, val))
+                if not key in self.value_history_request_counts.keys():
+                    self.value_history_request_counts[key] = 0
+                self.value_history_request_counts[(req.round_id, req.round_iteration)] += 1
+                if self.value_history_request_counts[key] == self.neighbor_count:
+                    self._debug(f'All neighbors got our value for {key}! Deleting it')
+                    del self.value_history_request_counts[key]
+                    del self.value_history[key]
+            asyncio.create_task(respond(token, req))
             if self.current_round is not None: # delete obsolete values
                 to_del = []
                 for k in self.value_history.keys():
@@ -234,10 +239,10 @@ class ConsensusAgent:
                         raise ProtoErrorException(msg)
                     if n_resp.round_id != self.current_round or n_resp.round_iteration != current_round_iteration:
                         self._debug(
-                            f'! got request/response from "{n_token}" from previous round/iteration:'
+                            f'! got response from "{n_token}" from previous round/iteration:'
                             f' {(n_resp.round_id, n_resp.round_iteration)}')
                         continue  # just listen for next response
-                    self._debug(f'got value from "{n_token}"!')
+                    self._debug(f'got value from "{n_token}" for {n_resp.round_id, n_resp.round_iteration}!')
                     neighbor_values[n_token] = n_resp.value
 
             self.neighbor_outcoming_psocket_selector.remove(self.MASTER_TOKEN)
@@ -306,7 +311,7 @@ class ConsensusAgent:
                 n_token, n_resp = token, req
                 if isinstance(n_resp, ProtoValueResponse):
                     self._debug(
-                        f'! got request/response from "{n_token}" from previous round/iteration:'
+                        f'! got response from "{n_token}" from previous round/iteration:'
                         f' {(n_resp.round_id, n_resp.round_iteration)}')
                     continue  # skip
                 if not isinstance(n_resp, ProtoRunOnceValueResponse):
