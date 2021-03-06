@@ -74,7 +74,7 @@ def get_resnet20_models(args):
     main_state_dict = None
 
     for agent in topology:
-        models[agent] = resnet20()
+        models[agent] = args['model']()
         if args['equalize_start_params']:
             if main_state_dict is None:
                 main_state_dict = models[agent].state_dict()
@@ -209,6 +209,7 @@ def main(args):
         'consensus_times': 1,
         'log_file_path': 'logs.log',
         'meters_path': 'meters/',
+        'model': resnet20,
     }
     for key, value in basic_args.items():
         if key not in args:
