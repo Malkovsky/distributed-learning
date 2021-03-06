@@ -5,7 +5,6 @@ tqdm
 ipywidgets
 IPython
 seaborn
-pytorch
 torchvision
 cvxpy
 networkx
