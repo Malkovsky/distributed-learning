@@ -8,7 +8,6 @@ import torchvision.transforms as transforms
 import numpy as np
 import time
 
-from networks.resnet import resnet20
 from utils.consensus_simple.meter import Meter
 from utils.consensus_simple.mixer import Mixer
 from utils.consensus_simple.utils import *
@@ -209,7 +208,6 @@ def main(args):
         'consensus_times': 1,
         'log_file_path': 'logs.log',
         'meters_path': 'meters/',
-        'model': resnet20,
     }
     for key, value in basic_args.items():
         if key not in args:
