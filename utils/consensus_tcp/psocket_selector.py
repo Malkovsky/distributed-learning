@@ -36,6 +36,11 @@ class PSocketSelector:
             for token in self.sockets.keys():
                 if token not in self._tasks:
                     self._tasks[token] = asyncio.create_task(self._wrap_listen_with_token(token))
+                else:
+                    if self._tasks[token].done():
+                        token, actual_result = self._tasks[token].result()
+                        del self._tasks[token]
+                        return token, actual_result
             try:
                 self._done, _ = await asyncio.wait(list(self._tasks.values()), return_when=asyncio.FIRST_COMPLETED, timeout=timeout)
             except TimeoutError:

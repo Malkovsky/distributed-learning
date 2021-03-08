@@ -61,6 +61,8 @@ class ConsensusAgent:
 
     async def _serve(self):
         self._debug('Serving...')
+        while not self.network_ready:
+            await asyncio.sleep(0.25)
         while True:
             token, req = await self.neighbor_incoming_psocket_selector.recv(0.5)
             if token is None:
@@ -96,6 +98,7 @@ class ConsensusAgent:
                 self._debug(f'Request is obsolete, skipping it')
                 continue
             async def respond(token, req):
+                key = (req.round_id, req.round_iteration)
                 while key not in self.value_history.keys() and key[0] >= self.current_round: # wait until it is calculated
                     await asyncio.sleep(0.05)
                 val = self.value_history[key]
@@ -224,6 +227,7 @@ class ConsensusAgent:
             while len(neighbor_values.keys()) != self.neighbor_count and not done_flag and not shutdown_flag:
                 # wait for values / done / shutdown
                 token, req = await self.neighbor_outcoming_psocket_selector.recv()
+                self._debug(f'{self.token}<-{token} <-----> {req!r}')
                 if token == self.MASTER_TOKEN:
                     data = req
                     if isinstance(data, ProtoDone):
