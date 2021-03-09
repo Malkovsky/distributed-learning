@@ -223,13 +223,15 @@ def main(args):
             factor /= 10
         return factor
 
-    if 'lr_schedule' not in args:
-        args['lr_schedule'] = lr_schedule
-
     if 'logger' in args:
         logger = args['logger']
     else:
         logger = get_logger(log_file_path=args['log_file_path'])
+
+    if 'lr_schedule' not in args:
+        args['lr_schedule'] = lr_schedule
+        logger.info('The standard learning rate schedule is used')
+
     logger.info('START with args \n{}'.format(args))
 
     # preparing
@@ -248,7 +250,7 @@ def main(args):
     optimizers = get_optimizers(args, models)
     logger.info('{} Optimizers successfully prepared'.format(len(optimizers)))
 
-    lr_schedulers = get_lr_schedulers(args, optimizers, lr_schedule=lr_schedule)
+    lr_schedulers = get_lr_schedulers(args, optimizers, lr_schedule=args['lr_schedule'])
     logger.info('{} LR schedulers successfully prepared'.format(len(lr_schedulers)))
 
     meters = {
@@ -305,6 +307,4 @@ if __name__ == '__main__':
     np.random.seed(SEED)
     torch.manual_seed(SEED)
 
-    #tmp_test_meter()
-    #tmp_test_mixer()
     main({})
