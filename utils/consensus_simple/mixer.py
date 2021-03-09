@@ -55,6 +55,8 @@ class Mixer(object):
         return max_dev
 
     def _get_deviation_dict(self, params):
+        if len(self.topology) <= 1:
+            return {agent: 0.0 for agent in self.topology}
         devs = {}
         for agent in self.topology:
             avg_neighbors_params = np.mean([params[neighbor] for neighbor in self.topology[agent] if neighbor != agent],
