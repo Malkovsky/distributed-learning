@@ -1,17 +1,16 @@
 import pickle5 as pickle
-import os
+from pathlib import Path
 
 
 class Meter(object):
 
-    def __init__(self, name, logger, load_path=None, save_path=''):
+    def __init__(self, name, logger, load_path=None, save_path=Path().cwd()):
 
         self.name = name
         self.logger = logger
         self.value_history = []
         self.save_path = save_path
-        if not os.path.exists(self.save_path):
-            os.makedirs(self.save_path)
+        self.save_path.mkdir(parents=True, exist_ok=True)
 
         if load_path is not None:
             with open(load_path, 'rb') as f:
@@ -29,7 +28,7 @@ class Meter(object):
         return self
 
     def save(self):
-        path = self.save_path + self.name + '.pickle'
+        path = self.save_path.joinpath(self.name + '.pickle')
         with open(path, 'wb') as f:
             pickle.dump(self.__dict__, f, protocol=pickle.HIGHEST_PROTOCOL)
         return self
