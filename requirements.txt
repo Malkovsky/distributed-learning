@@ -8,4 +8,5 @@ seaborn
 torchvision
 cvxpy
 networkx
+graphviz
 pickle5
