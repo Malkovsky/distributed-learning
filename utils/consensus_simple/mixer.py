@@ -57,12 +57,13 @@ class Mixer(object):
     def _get_deviation_dict(self, params):
         if len(self.topology) <= 1:
             return {agent: 0.0 for agent in self.topology}
-        devs = {}
+
+        avg_params = np.mean([params[agent] for agent in self.topology], axis=0)
+
+        deviation_dict = dict()
         for agent in self.topology:
-            avg_neighbors_params = np.mean([params[neighbor] for neighbor in self.topology[agent] if neighbor != agent],
-                                           axis=0)
-            devs[agent] = self.dev_metric(params[agent], avg_neighbors_params)
-        return devs
+            deviation_dict[agent] = self.dev_metric(params[agent], avg_params)
+        return deviation_dict
 
     def _get_flatten_model_params(self, model):
         return torch.cat([p.data.to(torch.float32).view(-1) for p in model.parameters()]).detach().clone().cpu().numpy()
@@ -77,3 +78,7 @@ class Mixer(object):
     def get_parameters_deviation(self):
         agents_params = {agent: self._get_flatten_model_params(self.models[agent]) for agent in self.topology}
         return self._get_deviation_dict(agents_params)
+
+    def get_max_parameters_std(self):
+        agents_params = {agent: self._get_flatten_model_params(self.models[agent]) for agent in self.topology}
+        return np.stack(agents_params.values()).std(axis=0).max()
