@@ -264,6 +264,7 @@ def main(args):
         for agent in topology
     }
     meters['epoch_time'] = Meter('epoch_time', logger, save_path=args['meters_path'])
+    meters['params_std'] = Meter('params_std', logger, save_path=args['meters_path'])
     logger.info('Meters successfully prepared')
 
     mixer = Mixer(models, topology, logger)
@@ -294,6 +295,8 @@ def main(args):
             test_stats = test(models[agent], test_loader, criterions[agent])
             meters[agent]['test_loss'].add(test_stats['loss']).save()
             meters[agent]['test_accuracy'].add(test_stats['accuracy']).save()
+
+        meters['params_std'].add(mixer.get_max_parameters_std()).save()
 
         epoch_time = time.time() - start_time
         meters['epoch_time'].add(epoch_time).save()
