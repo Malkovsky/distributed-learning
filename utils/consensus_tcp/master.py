@@ -10,70 +10,6 @@ from .psocket_multiplexer import PSocketMultiplexer
 from ..fast_averaging import find_optimal_weights
 
 
-class _AgentData:
-    def __init__(self, token):
-        self.token = token
-        self.to_agent_psocket: PickledSocketWrapper = None
-        self.from_agent_psocket: PickledSocketWrapper = None
-        self.host = None
-        self.port = None
-
-        self.asked_for_new_round = False
-        self.weight = 0.0
-        self.has_converged = False
-
-
-class _ConsensusData:
-    def __init__(self, topology):
-        self.topology = topology
-        self.tokens = list(set(np.array(topology).flatten()))
-        self.edge_weights = None
-        self.convergence_rate = None
-
-        self.round_counter = 0
-        self.round_is_running = False
-
-    def get_neighborhood_info_for_agent(self, token):
-        self._solve_fastest_convergence()
-
-        neighbors = {
-            u if token == v else v
-            for (u, v) in self.topology
-            if token == u or token == v
-        }
-        topology_w_edge_weights = zip(self.topology, self.edge_weights)
-        agent_top_ew = filter(lambda uv_c: (uv_c[0][0] == token or uv_c[0][1] == token), topology_w_edge_weights)
-        agent_edge_weights = {
-            token: [c for ((u, v), c) in agent_top_ew if (u == token or v == token)][0]
-            for token in neighbors
-        }
-
-        return agent_edge_weights, self.convergence_rate
-
-    def describe(self):
-        E = np.array([ [
-                int((u, v) in self.topology or (v, u) in self.topology)
-                for v in self.tokens
-            ] for u in self.tokens])
-        outdeg = np.sum(E, axis=1)
-        L = np.diag(outdeg) - E
-        L_eig = np.linalg.eigvals(L)
-        L_eig.sort()
-        self._solve_fastest_convergence()
-        return {
-            'laplacian': L,
-            'eigenvalues': L_eig,
-            'algebraic_connectivity': L_eig[1],
-            'convergence_speed': self.convergence_rate
-        }
-
-    def _solve_fastest_convergence(self):
-        if self.edge_weights is not None:
-            return self.edge_weights, self.convergence_rate
-        self.edge_weights, self.convergence_rate = find_optimal_weights(self.topology)
-        return self.edge_weights, self.convergence_rate
-
-
 async def _assert_proto_ok(psocket, msg):
     resp = await psocket.recv()
     if not isinstance(resp, ProtoOk):
@@ -88,8 +24,8 @@ class ConsensusMaster:
                  topology,
                  host: str, port: int,
                  debug=False):
-        self.consensus = _ConsensusData(topology)
-        self.agents: Dict[str, _AgentData] = dict()
+        self.consensus = self._ConsensusHandler(topology)
+        self.agents: Dict[str, ConsensusMaster._AgentHandler] = dict()
 
         self.host: str = host
         self.port: int = port
@@ -145,7 +81,7 @@ class ConsensusMaster:
             self._debug(f'From: {remote_name}.', msg)
             await incoming_psocket.send(ProtoErrorException(msg))
             return
-        agent = _AgentData(data.token)
+        agent = self._AgentHandler(data.token)
         agent.from_agent_psocket = incoming_psocket
         agent.host = data.host
         agent.port = data.port
@@ -185,7 +121,7 @@ class ConsensusMaster:
                                    f'Master: Send neighborhood data: Got unexpected response from {agent.token}')
         print('Master: All agents have been initialized!')
         await self._serve()
-            
+
     async def _serve(self):
         self._debug('Starting to serve agents...')
         psockets_to_listen = {
@@ -259,3 +195,65 @@ class ConsensusMaster:
                 msg = f'Received unexpected request from {token}: {req!r}'
                 print(msg)
                 await psocket.send(ProtoErrorException(msg))
+
+    class _AgentHandler:
+        def __init__(self, token):
+            self.token = token
+            self.to_agent_psocket: PickledSocketWrapper = None
+            self.from_agent_psocket: PickledSocketWrapper = None
+            self.host = None
+            self.port = None
+
+            self.asked_for_new_round = False
+            self.weight = 0.0
+            self.has_converged = False
+
+    class _ConsensusHandler:
+        def __init__(self, topology):
+            self.topology = topology
+            self.tokens = list(set(np.array(topology).flatten()))
+            self.edge_weights = None
+            self.convergence_rate = None
+
+            self.round_counter = 0
+            self.round_is_running = False
+
+        def get_neighborhood_info_for_agent(self, token):
+            self._solve_fastest_convergence()
+
+            neighbors = {
+                u if token == v else v
+                for (u, v) in self.topology
+                if token == u or token == v
+            }
+            topology_w_edge_weights = zip(self.topology, self.edge_weights)
+            agent_top_ew = filter(lambda uv_c: (uv_c[0][0] == token or uv_c[0][1] == token), topology_w_edge_weights)
+            agent_edge_weights = {
+                token: [c for ((u, v), c) in agent_top_ew if (u == token or v == token)][0]
+                for token in neighbors
+            }
+
+            return agent_edge_weights, self.convergence_rate
+
+        def describe(self):
+            E = np.array([[
+                int((u, v) in self.topology or (v, u) in self.topology)
+                for v in self.tokens
+            ] for u in self.tokens])
+            outdeg = np.sum(E, axis=1)
+            L = np.diag(outdeg) - E
+            L_eig = np.linalg.eigvals(L)
+            L_eig.sort()
+            self._solve_fastest_convergence()
+            return {
+                'laplacian': L,
+                'eigenvalues': L_eig,
+                'algebraic_connectivity': L_eig[1],
+                'convergence_speed': self.convergence_rate
+            }
+
+        def _solve_fastest_convergence(self):
+            if self.edge_weights is not None:
+                return self.edge_weights, self.convergence_rate
+            self.edge_weights, self.convergence_rate = find_optimal_weights(self.topology)
+            return self.edge_weights, self.convergence_rate

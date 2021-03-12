@@ -60,26 +60,12 @@ class ProtoNewRoundNotification:
 
 
 @dataclass
-class ProtoValueRequest:
-    round_id: int
-    round_iteration: int
-
-
-@dataclass
-class ProtoValueResponse:
-    round_id: int
-    round_iteration: int
-    value: Any
-
-
-@dataclass
 class ProtoRunOnceValueRequest:
-    iteration: int
+    pass
 
 
 @dataclass
 class ProtoRunOnceValueResponse:
-    iteration: int
     value: Any
 
 
