@@ -18,6 +18,11 @@ class ConsensusAgent:
         NETWORK_READY = 4,
         RUNNING_CONSENSUS = 5
 
+        def __lt__(self, other):
+            if not isinstance(other, ConsensusAgent.Status):
+                raise ValueError(f'Cannot compare Status and {other!r}')
+            return self.value < other.value
+
     def __init__(self,
                  token,
                  host, port,
@@ -177,6 +182,7 @@ class ConsensusAgent:
                 await psocket.send(ProtoErrorException(msg))
                 return
             # outer coro will wait until we finish!
+            self._debug(f'sending value to {neighbor_token}')
             await psocket.send(ProtoRunOnceValueResponse(self.value))
 
         respond_tasks = asyncio.gather(*[asyncio.create_task(respond_neighbor_once(neighbor.token))

@@ -226,8 +226,9 @@ class ConsensusMaster:
                 for (u, v) in self.topology
                 if token == u or token == v
             }
-            topology_w_edge_weights = zip(self.topology, self.edge_weights)
-            agent_top_ew = filter(lambda uv_c: (uv_c[0][0] == token or uv_c[0][1] == token), topology_w_edge_weights)
+            topology_w_edge_weights = list(zip(self.topology, self.edge_weights))
+            agent_top_ew = list(filter(lambda uv_c: (uv_c[0][0] == token or uv_c[0][1] == token),
+                                       topology_w_edge_weights))
             agent_edge_weights = {
                 token: [c for ((u, v), c) in agent_top_ew if (u == token or v == token)][0]
                 for token in neighbors
