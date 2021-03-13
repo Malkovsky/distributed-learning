@@ -59,8 +59,8 @@ class ConsensusAgent:
             async with self.server:
                 await self.server.serve_forever()
         except Exception as e:  # todo: graceful shutdown
-            print(f'Agent {self.token}: Error happened while serving: {e}')
-            raise
+            print(f'Agent {self.token}: Error happened while serving: {e!r}')
+            raise e
 
     async def _handle_connection(self, reader, writer):
         psocket = PickledSocketWrapper(reader, writer)
@@ -155,7 +155,7 @@ class ConsensusAgent:
         self.status = self.Status.NETWORK_READY
 
     async def run_round(self, value, weight, convergence_eps=None):
-        raise NotImplemented  # :)
+        raise NotImplemented()  # :)
 
     async def run_once(self, value):
         """
