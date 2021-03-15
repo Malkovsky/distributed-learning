@@ -1,25 +1,14 @@
 from dataclasses import dataclass
-from typing import List, Tuple, Any, Dict
+from typing import List, Tuple, Any, Dict, Set
 
 '''
-Master-Agent communication:
-Registration:
-    Agent  ---Register(token)--> Master
-    Agent  <------OK------------ Master
-Post-registration (all agents registered):
-    Agent  <--NeighborhoodData-- Master
-    Agent  -------OK-----------> Master
-    Agent  <---NeighborWeights-- Master
-    Agent  -------OK-----------> Master
-TODO
-    
-Agent-Agent communication:
-Every agent acts both like server (responding to requests) and client (performing requests).
-
-Registration:
-    Client  ---Register(token)--> Server
-    Client  <------OK------------ Server
-TODO
+Protocol communication invariants:
+* Both master and agent act as server and client.
+I.e. agent opens connection to master, sends it requests and receives responses to those requests and only those requests.
+When master needs to send some data that agent didn't request, master opens its own connection to the agent, 
+so their roles as server and client are swapped.
+* All requests are responded with exactly one response object. It will be ProtoOk() most of the time.
+But in case of an error, the response might be an instance of ProtoErrorException.
 '''
 
 
@@ -45,13 +34,9 @@ class ProtoOk:
 
 @dataclass
 class ProtoNeighborhoodData:
-    neighbors: List[Tuple[str, str, int]]   # (token, host, port)
-
-
-@dataclass
-class ProtoNeighborWeights:
+    neighbors: Dict[str, Tuple[str, int]]   # (token -> (host, port))
     weights: Dict[str, float]
-    convergence_rate: float
+    global_convergence_rate: float
 
 
 @dataclass
@@ -72,20 +57,6 @@ class ProtoNewRoundRequest:
 @dataclass
 class ProtoNewRoundNotification:
     round_id: int
-    mean_weight: float
-
-
-@dataclass
-class ProtoValueRequest:
-    round_id: int
-    round_iteration: int
-
-
-@dataclass
-class ProtoValueResponse:
-    round_id: int
-    round_iteration: int
-    value: Any
 
 
 @dataclass
@@ -106,3 +77,9 @@ class ProtoDone:
 @dataclass
 class ProtoShutdown:
     pass
+
+
+@dataclass
+class ProtoTelemetry:
+    tag: str
+    payload: Any

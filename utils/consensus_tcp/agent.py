@@ -2,324 +2,229 @@ import numpy as np
 import asyncio
 import sys
 from typing import Dict, List
+from enum import Enum
 
 from .pickled_socket import PickledSocketWrapper
 from .protocol import *
-from .psocket_selector import PSocketSelector
+from .psocket_multiplexer import PSocketMultiplexer
+from .master import ConsensusMaster, _assert_proto_ok
 
 
 class ConsensusAgent:
-    MASTER_TOKEN = 'MASTER'
+    class Status(Enum):
+        INIT = 1,
+        REGISTRATION_COMPLETE = 2,
+        GOT_NEIGHBORHOOD_DATA = 3,
+        NETWORK_READY = 4,
+        RUNNING_CONSENSUS = 5
 
-    def __init__(self, token, host, port, master_host, master_port, convergence_eps=1e-4, public_host_port=None, debug=False):
+        def __lt__(self, other):
+            if not isinstance(other, ConsensusAgent.Status):
+                raise ValueError(f'Cannot compare Status and {other!r}')
+            return self.value < other.value
+
+    def __init__(self,
+                 token,
+                 host, port,
+                 master_host, master_port,
+                 public_host_port=None,
+                 debug=False):
         self.token = token
         self.host = host
         self.port = port
-        self.master_host = master_host
-        self.master_port = master_port
         self.public_host_port = (host, port) if public_host_port is None else public_host_port
+        self.server: asyncio.Server = None
 
-        self.neighbor_count = None
-        self.neighbor_psockets_incoming: Dict[Any, PickledSocketWrapper] = dict()
-        self.neighbor_incoming_psocket_selector = PSocketSelector()
-        self.neighbor_psockets_outcoming: Dict[Any, PickledSocketWrapper] = dict()
-        self.neighbor_outcoming_psocket_selector = PSocketSelector()
-        self.master_psocket = None
+        self.master = self._MasterHandler()
+        self.master.host, self.master.port = master_host, master_port
 
-        self.network_ready = False
-        self.neighbor_weights = None
-        self.convergence_rate = None
-        self.convergence_eps = convergence_eps
-        self.current_round = None
-        self.value_history = {}
-        self.value_history_request_counts = {}
-        self.run_once_value = None
-        self.run_once_request_count = 0
+        self.neighbors: Dict[str, ConsensusAgent._NeighborAgentHandler] = dict()
 
         self.debug = debug
 
-        self.server: asyncio.Server = None
+        self.status = self.Status.INIT
+        self.value = None  # not None only while self.status == Status.RUNNING_CONSENSUS
 
     def _debug(self, *args, **kwargs):
         if self.debug:
             if 'file' not in kwargs.keys():
-                print(f'Agent "{self.token}":', *args, **kwargs, file=sys.stderr)
+                print(f'Agent {self.token}:', *args, **kwargs, file=sys.stderr)
             else:
-                print(f'Agent "{self.token}":', *args, **kwargs)
+                print(f'Agent {self.token}:', *args, **kwargs)
 
     async def serve_forever(self):
-        self.server = await asyncio.start_server(self.handle_connection, self.host, self.port)
-        print(f'Serving on {self.server.sockets[0].getsockname()}')
+        self.server = await asyncio.start_server(self._handle_connection, self.host, self.port)
+        print(f'Agent {self.token}: Serving on {self.server.sockets[0].getsockname()}')
         try:
             async with self.server:
-                serve_task = self.server.get_loop().create_task(self._serve())
                 await self.server.serve_forever()
-        except:
-            serve_task.cancel()
-            raise
+        except Exception as e:  # todo: graceful shutdown
+            print(f'Agent {self.token}: Error happened while serving: {e!r}')
+            raise e
 
-    async def _serve(self):
-        self._debug('Serving...')
-        while True:
-            token, req = await self.neighbor_incoming_psocket_selector.recv()
-            if token is None:
-                await asyncio.sleep(0.25)
-                continue
-            if isinstance(req, ProtoRunOnceValueRequest):
-                self._debug(f'Got (run once) value request from agent({token})')
-                while self.run_once_value is None: # wait for the value
-                    await asyncio.sleep(0.02)
-                await self.neighbor_psockets_incoming[token].send(
-                    ProtoRunOnceValueResponse(self.run_once_value)
-                )
-                self.run_once_request_count += 1
-                if self.run_once_request_count == self.neighbor_count:
-                    self.run_once_value = None
-                    self.run_once_request_count = 0
-                continue
-
-            if not isinstance(req, ProtoValueRequest):
-                msg = f'From agent({token}). Expected value request, got: {req!r}'
-                self._debug(msg)
-                raise ProtoErrorException(msg)
-            key = (req.round_id, req.round_iteration)
-            self._debug(f'Got value request from agent({token}) for {key}')
-            while key not in self.value_history.keys() and key[0] >= self.current_round: # wait until it is calculated
-                await asyncio.sleep(0.02)
-            if key[0] < self.current_round: # obsolete request:
-                # just skip it
-                continue
-            val = self.value_history[key]
-            await self.neighbor_psockets_incoming[token].send(ProtoValueResponse(req.round_id, req.round_iteration, val))
-            if not key in self.value_history_request_counts.keys():
-                self.value_history_request_counts[key] = 0
-            self.value_history_request_counts[(req.round_id, req.round_iteration)] += 1
-            if self.value_history_request_counts[key] == self.neighbor_count:
-                self._debug(f'All neighbors got our value for {key}! Deleting it')
-                del self.value_history_request_counts[key]
-                del self.value_history[key]
-
-            if self.current_round is not None: # delete obsolete values
-                to_del = []
-                for k in self.value_history.keys():
-                    if k[0] < self.current_round:
-                        to_del.append(k)
-                for k in to_del:
-                    self._debug(f'Key {k} is obsolete: current round is {self.current_round}. Deleting it')
-                    del self.value_history[k]
-                    if k in self.value_history_request_counts.keys():
-                        del self.value_history_request_counts[k]
-
-    async def handle_connection(self, reader, writer):  # these connections are from other agents
+    async def _handle_connection(self, reader, writer):
         psocket = PickledSocketWrapper(reader, writer)
         data = await psocket.recv()
         remote_name = psocket.writer.get_extra_info("peername")
         if not isinstance(data, ProtoRegister):
-            msg = f'From: {remote_name}. Expected registration data, got: {data!r}'
-            self._debug(msg)
-            raise ProtoErrorException(msg)
-        await psocket.send(ProtoOk())
-        self.neighbor_psockets_incoming[data.token] = psocket
-        self._debug(f'From: {remote_name}. Registered {data.token}!')
-        self.neighbor_incoming_psocket_selector.add(data.token, psocket)
+            msg = f'Agent {self.token}: From: {remote_name}. Expected registration data, got: {data!r}'
+            print(msg)
+            await psocket.send(ProtoErrorException(msg))
+            return
+        if data.token == ConsensusMaster.MASTER_TOKEN:
+            if self.status > self.Status.INIT:
+                msg = f'Agent {self.token}: Post-init master connection: illegal state'
+                print(msg)
+                await psocket.send(ProtoErrorException(msg))
+                return
+            self._debug('Got incoming connection from master!')
+            self.master.from_master_psocket = psocket
+            await psocket.send(ProtoOk())
 
-    async def do_handshake(self):
+            self._debug(f'Waiting for neighborhood data')
+            # now master will send us neighborhood data
+            neighborhood_data = await psocket.recv()
+            if not isinstance(neighborhood_data, ProtoNeighborhoodData):
+                msg = f'Agent {self.token}: Expected neighborhood data, got: {neighborhood_data!r}'
+                print(msg)
+                await psocket.send(ProtoErrorException(msg))
+                return
+            # self.convergence_rate = neighborhood_data.global_convergence_rate
+            self._debug('Got neighborhood data from master: ', neighborhood_data)
+            for token, (host, port) in neighborhood_data.neighbors.items():
+                neighbor = self._NeighborAgentHandler(token)
+                neighbor.host, neighbor.port = host, port
+                neighbor.edge_weight = neighborhood_data.weights[token]
+                self.neighbors[token] = neighbor
+            await psocket.send(ProtoOk())
+            self._debug('Changing status to GOT_NEIGHBORHOOD_DATA')
+            self.status = self.Status.GOT_NEIGHBORHOOD_DATA  # trigger sleeping coros
+        else:
+            # we need to verify that this incoming connection is from our neighbor
+            # we cannot do that until master tells us who is our neighbor
+            while self.status < self.Status.GOT_NEIGHBORHOOD_DATA:
+                await asyncio.sleep(0.05)
+
+            if data.token not in self.neighbors.keys(): # unknown neighbor / connection
+                msg = f'Agent {self.token}: Incoming connection from {data.token}: not in my neighborhood'
+                print(msg)
+                await psocket.send(ProtoErrorException(msg))
+                return
+
+            self._debug(f'Got handshake from neighbor {data.token}')
+            self.neighbors[data.token].from_neighbor_psocket = psocket
+            await psocket.send(ProtoOk())
+
+    async def _do_handshake(self):
+        """
+        Performs handshake with master and all neighbors
+        After completion, self.status will be Status.NETWORK_READY
+        """
         self._debug('Performing handshake with master')
-        reader, writer = await asyncio.open_connection(self.master_host, self.master_port)
-        self.master_psocket = PickledSocketWrapper(reader, writer)
-        await self.master_psocket.send(ProtoRegister(self.token, self.public_host_port[0], self.public_host_port[1]))
-        ok = await self.master_psocket.recv()
-        remote_name = self.master_psocket.writer.get_extra_info("peername")
-        if not isinstance(ok, ProtoOk):
-            msg = f'From master({remote_name}). Expected OK, got: {ok!r}'
-            self._debug(msg)
-            raise ProtoErrorException(msg)
-        self._debug('Successfully registered. Waiting for neighborhood data...')
-        neighborhood_data = await self.master_psocket.recv()
-        if not isinstance(neighborhood_data, ProtoNeighborhoodData):
-            msg = f'From master({remote_name}). Expected neighborhood data, got: {neighborhood_data!r}'
-            self._debug(msg)
-            raise ProtoErrorException(msg)
-        await self.master_psocket.send(ProtoOk())
-        self.neighbor_count = len(neighborhood_data.neighbors)
-        self._debug('Got neighborhood data. Waiting for consensus epsilon...')
-        neighbor_weights_data = await self.master_psocket.recv()
-        if not isinstance(neighbor_weights_data, ProtoNeighborWeights):
-            msg = f'From master({remote_name}). Expected neighbor weights data, got: {neighbor_weights_data!r}'
-            self._debug(msg)
-            raise ProtoErrorException(msg)
-        self.neighbor_weights = neighbor_weights_data.weights
-        self.convergence_rate = neighbor_weights_data.convergence_rate
-        await self.master_psocket.send(ProtoOk())
-        self._debug('Got consensus epsilon!')
+        reader, writer = await asyncio.open_connection(self.master.host, self.master.port)
+        self.master.to_master_psocket = PickledSocketWrapper(reader, writer)
+        await self.master.to_master_psocket.send(
+            ProtoRegister(self.token, self.public_host_port[0], self.public_host_port[1])
+        )
+        await _assert_proto_ok(self.master.to_master_psocket,
+                               f'Agent {self.token}: Master handshake: Unexpected response')
+        self._debug('Successfully registered')
+        # when all agents pass this point,
+        # master will open new connections to all agents and send them neighborhood data.
+        # handle_connection will process master's info, we just need to wait until initialization completes
+        while self.status < self.Status.GOT_NEIGHBORHOOD_DATA:
+            await asyncio.sleep(0.05)
+        self._debug('do_handshake GOT_NEIGHBORHOOD_DATA trigger')
 
-        self._debug('Performing handshake with neighbors...')
-        for (n_token, n_host, n_port) in neighborhood_data.neighbors:
-            self._debug(f'Performing handshake with {n_token}')
-            n_reader, n_writer = await asyncio.open_connection(n_host, n_port)
-            n_psocket = PickledSocketWrapper(n_reader, n_writer)
-            self.neighbor_psockets_outcoming[n_token] = n_psocket
+        for neighbor in self.neighbors.values():
+            self._debug(f'Performing handshake with {neighbor.token}')
+            n_reader, n_writer = await asyncio.open_connection(neighbor.host, neighbor.port)
+            neighbor.to_neighbor_psocket = PickledSocketWrapper(n_reader, n_writer)
 
-            await n_psocket.send(ProtoRegister(self.token, self.host, self.port))
-            ok = await n_psocket.recv()
-            if not isinstance(ok, ProtoOk):
-                remote_name = self.master_psocket.writer.get_extra_info("peername")
-                msg = f'From agent({remote_name}). Expected Ok data, got: {ok!r}'
-                self._debug(msg)
-                raise ProtoErrorException(msg)
-            self._debug(f'Success!')
-            self.neighbor_outcoming_psocket_selector.add(n_token, n_psocket)
+            await neighbor.to_neighbor_psocket.send(ProtoRegister(self.token, self.host, self.port))
+            await _assert_proto_ok(neighbor.to_neighbor_psocket,
+                                   f'Agent {self.token}: handshake with neighbor {neighbor.token} has failed')
 
+        # we have successfully set up outgoing connections to our neighbors
+        # we need to wait until they open connections to us
+        self._debug(f'Waiting for incoming connections from neighbors...')
+        while not all([neighbor.from_neighbor_psocket is not None for neighbor in self.neighbors.values()]):
+            await asyncio.sleep(0.05)
         self._debug(f'We are ready for consensus now!')
-        self.network_ready = True
+        self._debug(f'Changing status to NETWORK_READY')
+        self.status = self.Status.NETWORK_READY
 
     async def run_round(self, value, weight, convergence_eps=None):
-        if not self.network_ready:
-            await self.do_handshake()
-
-        self._debug(f'running new round with v={value}, w={weight}')
-        self._debug('sending new round request to master')
-        await self.master_psocket.send(ProtoNewRoundRequest(weight))
-
-        self._debug(f'waiting for new round notification from master')
-        resp = await self.master_psocket.recv()
-        if not isinstance(resp, ProtoNewRoundNotification):
-            msg = f'From master. Expected new round notification, got: {resp!r}'
-            self._debug(msg)
-            raise ProtoErrorException(msg)
-        self.current_round = resp.round_id
-        current_round_iteration = 0
-        mean_weight = resp.mean_weight
-        self._debug(f'Got new round notification from master! Round id: {resp.round_id}')
-
-        if convergence_eps is None:
-            convergence_eps = self.convergence_eps
-        converged_flag_set = False
-        done_flag = False
-        shutdown_flag = False
-        y = value * (weight / mean_weight)
-        self._debug(f'Adding value to history with key {(self.current_round, current_round_iteration)}')
-        self.value_history[(self.current_round, current_round_iteration)] = y.copy()
-        self.value_history_request_counts[(self.current_round, current_round_iteration)] = 0
-
-        while not done_flag and not shutdown_flag:
-            for token, psocket in self.neighbor_psockets_outcoming.items():
-                self._debug(f'requesting value from agent({token}) - {(self.current_round, current_round_iteration)}')
-                await psocket.send(ProtoValueRequest(self.current_round, current_round_iteration))
-
-            neighbor_values = {}
-
-            self.neighbor_outcoming_psocket_selector.add(self.MASTER_TOKEN, self.master_psocket)
-
-            while len(neighbor_values.keys()) != self.neighbor_count and not done_flag and not shutdown_flag:
-                # wait for values / done / shutdown
-                token, req = await self.neighbor_outcoming_psocket_selector.recv()
-                if token == self.MASTER_TOKEN:
-                    data = req
-                    if isinstance(data, ProtoDone):
-                        self._debug('got DONE from master!!!')
-                        done_flag = True
-                    elif isinstance(data, ProtoShutdown):
-                        self._debug('Got SHUTDOWN from master')
-                        shutdown_flag = True
-                    else:
-                        msg = f'Unexpected request from master: {data!r}'
-                        self._debug(msg)
-                        raise ProtoErrorException(msg)
-                else: # it is neighbor's token
-                    n_token, n_resp = token, req
-                    if not isinstance(n_resp, ProtoValueResponse):
-                        msg = f'From agent({n_token}). Expected value response, got: {n_resp!r}'
-                        self._debug(msg)
-                        raise ProtoErrorException(msg)
-                    if n_resp.round_id != self.current_round or n_resp.round_iteration != current_round_iteration:
-                        self._debug(
-                            f'! got request/response from "{n_token}" from previous round/iteration:'
-                            f' {(n_resp.round_id, n_resp.round_iteration)}')
-                        continue  # just listen for next response
-                    self._debug(f'got value from "{n_token}"!')
-                    neighbor_values[n_token] = n_resp.value
-
-            self.neighbor_outcoming_psocket_selector.remove(self.MASTER_TOKEN)
-
-            if shutdown_flag:
-                self.server.close()
-                raise ProtoErrorException(ProtoShutdown())
-
-            if done_flag: break
-
-            # we've got all the values from neighbors, now we can update our value
-            sum_neighbor_weights = np.sum([w for w in self.neighbor_weights.values()])
-            y = (1 - sum_neighbor_weights) * y + np.sum([w * neighbor_values[n] for (n, w) in self.neighbor_weights.items()], axis=0)
-            c = np.all([np.abs(y - v) <= convergence_eps for v in neighbor_values.values()])
-
-            self._debug(f'finished iteration #{current_round_iteration}')
-            current_round_iteration += 1
-            self._debug(f'Adding value to history with key {(self.current_round, current_round_iteration)}')
-            self.value_history[(self.current_round, current_round_iteration)] = y.copy()
-            self.value_history_request_counts[(self.current_round, current_round_iteration)] = 0
-
-            if c:
-                if not converged_flag_set:
-                    self._debug('sending CONVERGED to master')
-                    await self.master_psocket.send(ProtoConverged())
-                    converged_flag_set = True
-            else:
-                if converged_flag_set:
-                    self._debug('sending NOT_CONVERGED to master')
-                    await self.master_psocket.send(ProtoNotConverged())
-                    converged_flag_set = False
-        self._debug(f'final result: {y}')
-        return y
+        raise NotImplemented()  # :)
 
     async def run_once(self, value):
-        if not self.network_ready:
-            await self.do_handshake()
+        """
+        Runs one iteration of consensus
+        This method waits until all our neighbors got our value
+        """
+        if self.status < self.Status.NETWORK_READY:
+            await self._do_handshake()
+        if self.status == self.Status.RUNNING_CONSENSUS:
+            msg = 'Consensus is already running! Illegal state?'
+            print(msg)
+            raise AssertionError(msg)
 
-        while self.run_once_value is not None:  # wait until all neighbors got our previous value
-            await asyncio.sleep(0.02)
+        self.status = self.Status.RUNNING_CONSENSUS
+        self._debug(f'consensus iteration start')
+        self.value = value
 
-        self.run_once_value = value
+        async def respond_neighbor_once(neighbor_token):
+            psocket = self.neighbors[neighbor_token].from_neighbor_psocket
+            req = await psocket.recv()
+            if not isinstance(req, ProtoRunOnceValueRequest):
+                msg = f'Agent {self.token}: run_once: unexpected request from neighbor {neighbor_token}: {req!r}'
+                print(msg)
+                await psocket.send(ProtoErrorException(msg))
+                return
+            # outer coro will wait until we finish!
+            self._debug(f'sending value to {neighbor_token}')
+            await psocket.send(ProtoRunOnceValueResponse(self.value))
 
-        for token, psocket in self.neighbor_psockets_outcoming.items():
-            self._debug(f'requesting (run once) value from agent({token})')
-            await psocket.send(ProtoRunOnceValueRequest())
-
+        respond_tasks = asyncio.gather(*[asyncio.create_task(respond_neighbor_once(neighbor.token))
+                                         for neighbor in self.neighbors.values()], return_exceptions=True)
+        # order matters! create respond task before requesting
         neighbor_values = {}
-
-        self.neighbor_outcoming_psocket_selector.add(self.MASTER_TOKEN, self.master_psocket)
-
-        while len(neighbor_values.keys()) != self.neighbor_count:
-            # wait for values / done / shutdown
-            token, req = await self.neighbor_outcoming_psocket_selector.recv()
-            if token == self.MASTER_TOKEN:
-                data = req
-                if isinstance(data, ProtoShutdown):
-                    self._debug('Got SHUTDOWN from master')
-                    self.server.close()
-                    raise ProtoErrorException(ProtoShutdown())
-                else:
-                    msg = f'Unexpected request from master: {data!r}'
-                    self._debug(msg)
-                    raise ProtoErrorException(msg)
-            else: # it is neighbor's token
-                n_token, n_resp = token, req
-                if isinstance(n_resp, ProtoValueResponse):
-                    self._debug(
-                        f'! got request/response from "{n_token}" from previous round/iteration:'
-                        f' {(n_resp.round_id, n_resp.round_iteration)}')
-                    continue  # skip
-                if not isinstance(n_resp, ProtoRunOnceValueResponse):
-                    msg = f'From agent({n_token}). Expected (run once) value response, got: {n_resp!r}'
-                    self._debug(msg)
-                    raise ProtoErrorException(msg)
-                self._debug(f'got (run once) value from "{n_token}"!')
-                neighbor_values[n_token] = n_resp.value
-
-        self.neighbor_outcoming_psocket_selector.remove(self.MASTER_TOKEN)
+        for neighbor in self.neighbors.values():  # todo: run concurrently
+            self._debug(f'requesting value from neighbor {neighbor.token}')
+            await neighbor.to_neighbor_psocket.send(ProtoRunOnceValueRequest())
+            resp = await neighbor.to_neighbor_psocket.recv()
+            if not isinstance(resp, ProtoRunOnceValueResponse):
+                msg = f'Agent {self.token}: run_once: unexpected response from neighbor {neighbor.token}: {resp!r}'
+                print(msg)
+                raise ProtoErrorException(msg)
+            neighbor_values[neighbor.token] = resp.value
 
         # we've got all the values from neighbors, now we can update our value
-        sum_neighbor_weights = np.sum([w for w in self.neighbor_weights.values()])
-        value = (1 - sum_neighbor_weights) * value + np.sum([w * neighbor_values[n] for (n, w) in self.neighbor_weights.items()], axis=0)
+        sum_neighbor_weights = np.sum([neighbor.edge_weight for neighbor in self.neighbors.values()])
+        value = (1.0 - sum_neighbor_weights) * value + \
+                np.sum([neighbor_values[token] * self.neighbors[token].edge_weight
+                        for token in self.neighbors.keys()], axis=0)
         self._debug(f'final result: {value}')
+        await respond_tasks
+        self.value = None
+        self._debug(f'consensus iteration end')
+        self.status = self.Status.NETWORK_READY
         return value
+
+    class _MasterHandler:
+        def __init__(self):
+            self.token = ConsensusMaster.MASTER_TOKEN
+            self.host = None
+            self.port = None
+            self.to_master_psocket: PickledSocketWrapper = None
+            self.from_master_psocket: PickledSocketWrapper = None
+
+    class _NeighborAgentHandler:
+        def __init__(self, token):
+            self.token = token
+            self.host = None
+            self.port = None
+            self.to_neighbor_psocket: PickledSocketWrapper = None
+            self.from_neighbor_psocket: PickledSocketWrapper = None
+
+            self.edge_weight = None
