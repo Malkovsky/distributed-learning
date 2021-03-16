@@ -5,8 +5,8 @@ tqdm
 ipywidgets
 IPython
 seaborn
-pytorch
 torchvision
 cvxpy
 networkx
+graphviz
 pickle5
