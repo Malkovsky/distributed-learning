@@ -6,6 +6,7 @@ import pprint
 from .pickled_socket import PickledSocketWrapper
 from .protocol import *
 from .psocket_multiplexer import PSocketMultiplexer
+from .telemetry_processor import TelemetryProcessor
 
 from ..fast_averaging import find_optimal_weights
 
@@ -23,7 +24,8 @@ class ConsensusMaster:
     def __init__(self,
                  topology,
                  host: str, port: int,
-                 debug=False):
+                 debug=False,
+                 telemetry_processor:TelemetryProcessor=None):
         self.consensus = self._ConsensusHandler(topology)
         self.agents: Dict[str, ConsensusMaster._AgentHandler] = dict()
 
@@ -32,6 +34,7 @@ class ConsensusMaster:
         self.server: asyncio.Server = None
 
         self.debug = debug
+        self.telemetry_processor = telemetry_processor
 
     async def serve_forever(self):
         print('topology info:')
@@ -187,10 +190,13 @@ class ConsensusMaster:
                 self.agents[token].has_converged = False
                 await psocket.send(ProtoOk())
             elif isinstance(req, ProtoTelemetry):
-                self._debug(f'Received Telemetry from {token} with tag {req.tag}')
-                # TODO
-                self._debug(f'Telemetry is not yet supported')
+                self._debug(f'Received Telemetry from {token}')
                 await psocket.send(ProtoOk())
+                try:
+                    if self.telemetry_processor:
+                        self.telemetry_processor.process(token, req.payload)
+                except Exception as e:
+                    print(f'Telemetry processor threw an exception: {e!r}')
             else:
                 msg = f'Received unexpected request from {token}: {req!r}'
                 print(msg)

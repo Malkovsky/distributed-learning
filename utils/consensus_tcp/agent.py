@@ -211,6 +211,11 @@ class ConsensusAgent:
         self.status = self.Status.NETWORK_READY
         return value
 
+    async def send_telemetry(self, payload):
+        if self.status < self.Status.NETWORK_READY:
+            await self._do_handshake()
+        await self.master.to_master_psocket.send(ProtoTelemetry(payload))
+
     class _MasterHandler:
         def __init__(self):
             self.token = ConsensusMaster.MASTER_TOKEN

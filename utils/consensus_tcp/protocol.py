@@ -81,5 +81,4 @@ class ProtoShutdown:
 
 @dataclass
 class ProtoTelemetry:
-    tag: str
     payload: Any
