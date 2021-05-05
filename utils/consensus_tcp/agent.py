@@ -1,12 +1,10 @@
 import numpy as np
 import asyncio
 import sys
-from typing import Dict, List
 from enum import Enum
 
 from .pickled_socket import PickledSocketWrapper
 from .protocol import *
-from .psocket_multiplexer import PSocketMultiplexer
 from .master import ConsensusMaster, _assert_proto_ok
 
 
@@ -181,15 +179,12 @@ class ConsensusAgent:
                 print(msg)
                 await psocket.send(ProtoErrorException(msg))
                 return
-            # outer coro will wait until we finish!
             self._debug(f'sending value to {neighbor_token}')
             await psocket.send(ProtoRunOnceValueResponse(self.value))
 
-        respond_tasks = asyncio.gather(*[asyncio.create_task(respond_neighbor_once(neighbor.token))
-                                         for neighbor in self.neighbors.values()], return_exceptions=True)
-        # order matters! create respond task before requesting
         neighbor_values = {}
-        for neighbor in self.neighbors.values():  # todo: run concurrently
+
+        async def ask_neighbor_once(neighbor):
             self._debug(f'requesting value from neighbor {neighbor.token}')
             await neighbor.to_neighbor_psocket.send(ProtoRunOnceValueRequest())
             resp = await neighbor.to_neighbor_psocket.recv()
@@ -199,13 +194,18 @@ class ConsensusAgent:
                 raise ProtoErrorException(msg)
             neighbor_values[neighbor.token] = resp.value
 
+        respond_tasks = [asyncio.create_task(respond_neighbor_once(neighbor.token))
+                         for neighbor in self.neighbors.values()]
+        ask_tasks = [asyncio.create_task(ask_neighbor_once(neighbor))
+                     for neighbor in self.neighbors.values()]
+        await asyncio.gather(*(respond_tasks + ask_tasks))
+
         # we've got all the values from neighbors, now we can update our value
         sum_neighbor_weights = np.sum([neighbor.edge_weight for neighbor in self.neighbors.values()])
         value = (1.0 - sum_neighbor_weights) * value + \
                 np.sum([neighbor_values[token] * self.neighbors[token].edge_weight
                         for token in self.neighbors.keys()], axis=0)
         self._debug(f'final result: {value}')
-        await respond_tasks
         self.value = None
         self._debug(f'consensus iteration end')
         self.status = self.Status.NETWORK_READY
@@ -215,6 +215,7 @@ class ConsensusAgent:
         if self.status < self.Status.NETWORK_READY:
             await self._do_handshake()
         await self.master.to_master_psocket.send(ProtoTelemetry(payload))
+        await _assert_proto_ok(self.master.to_master_psocket, "Expected to receive ProtoOk from master")
 
     class _MasterHandler:
         def __init__(self):
