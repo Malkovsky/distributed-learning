@@ -10,9 +10,9 @@ from .master import GossipMaster, _assert_proto_ok
 
 class GossipAgent:
     class Status(Enum):
-        INIT = 1,
-        REGISTRATION_COMPLETE = 2,
-        NETWORK_READY = 3,
+        INIT = 1
+        REGISTRATION_COMPLETE = 2
+        NETWORK_READY = 3
         RUNNING_GOSSIP = 4
 
         def __lt__(self, other):
@@ -139,13 +139,14 @@ class GossipAgent:
 
         if resp.neighbor is None:
             self._debug(f'no neighbor for round {self.round_id}')
+            self.status = self.Status.NETWORK_READY
             return value
 
         neighbor_token = resp.neighbor
         neighbor_address = resp.address  # (host, port)
 
         async def listen_to_neighbor(neighbor_token):
-            while neighbor_token not in self.neighbors.keys():
+            while neighbor_token not in self.neighbors.keys() or self.neighbors[neighbor_token].from_neighbor_psocket is None:
                 await asyncio.sleep(0.05)
             psocket = self.neighbors[neighbor_token].from_neighbor_psocket
             req = await psocket.recv()
@@ -168,6 +169,9 @@ class GossipAgent:
                 handler = self._NeighborAgentHandler(neighbor)
                 handler.host = address[0]
                 handler.port = address[1]
+                self.neighbors[neighbor] = handler
+            if self.neighbors[neighbor].to_neighbor_psocket is None:
+                handler = self.neighbors[neighbor]
                 reader, writer = await asyncio.open_connection(address[0], address[1])
                 handler.to_neighbor_psocket = PickledSocketWrapper(reader, writer)
                 await handler.to_neighbor_psocket.send(
@@ -176,7 +180,7 @@ class GossipAgent:
                 await _assert_proto_ok(handler.to_neighbor_psocket,
                                        f'Agent {self.token}: Neighbor handshake: Unexpected response')
                 self._debug(f'Successfully connected to neighbor {neighbor_token}')
-                self.neighbors[neighbor] = handler
+
 
             self._debug(f'sending our value to {neighbor_token}')
             await self.neighbors[neighbor].to_neighbor_psocket.send(ProtoGossipValueExchange(self.round_id, value))

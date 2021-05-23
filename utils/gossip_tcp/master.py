@@ -104,11 +104,11 @@ class GossipMaster:
         async for (token, req, psocket) in PSocketMultiplexer(psockets_to_listen):
             if isinstance(req, ProtoGossipNeighborRequest):
                 self._debug(f'Received GossipNeighborRequest from {token}')
-                resp = ProtoGossipNeighbor()
-                resp.neighbor = self.gossip.get_matching_node_for_token(token, req.round_id)
-                if resp.neighbor is not None:
-                    resp.address = (self.agents[resp.neighbor].host, self.agents[resp.neighbor].port)
-                await psocket.send(resp)
+                neighbor = self.gossip.get_matching_node_for_token(token, req.round_id)
+                address = None
+                if neighbor is not None:
+                    address = (self.agents[neighbor].host, self.agents[neighbor].port)
+                await psocket.send(ProtoGossipNeighbor(neighbor, address))
             elif isinstance(req, ProtoTelemetry):
                 self._debug(f'Received Telemetry from {token}')
                 await psocket.send(ProtoOk())
