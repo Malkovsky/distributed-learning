@@ -1,12 +1,11 @@
 import numpy as np
 import asyncio, sys
-from typing import Dict, List, Any
 import pprint
 
-from .pickled_socket import PickledSocketWrapper
+from ..tcp_utils.pickled_socket import PickledSocketWrapper
+from ..tcp_utils.psocket_multiplexer import PSocketMultiplexer
 from .protocol import *
-from .psocket_multiplexer import PSocketMultiplexer
-from .telemetry_processor import TelemetryProcessor
+from ..telemetry_processor import TelemetryProcessor
 
 from ..fast_averaging import find_optimal_weights
 

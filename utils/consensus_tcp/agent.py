@@ -3,7 +3,7 @@ import asyncio
 import sys
 from enum import Enum
 
-from .pickled_socket import PickledSocketWrapper
+from ..tcp_utils.pickled_socket import PickledSocketWrapper
 from .protocol import *
 from .master import ConsensusMaster, _assert_proto_ok
 
